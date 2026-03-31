@@ -178,6 +178,8 @@ typer
 rich
 requests                     # for Gutenberg fetching
 python-dotenv
+pytest
+pytest-mock
 ```
 
 Install with:
