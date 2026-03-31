@@ -1,0 +1,11 @@
+anthropic
+chromadb
+sentence-transformers
+rank_bm25
+torch                        # required by sentence-transformers
+typer
+rich
+requests                     # for Gutenberg fetching
+python-dotenv
+pytest
+pytest-mock
