@@ -1,0 +1,194 @@
+"""Hybrid retrieval: RRF merge of dense + sparse results, then cross-encoder reranking."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from sentence_transformers import CrossEncoder
+
+import config
+from retrieval.dense import DenseResult, dense_search
+from retrieval.sparse import BM25Index, SparseResult
+
+
+# ── Result type ───────────────────────────────────────────────────────────────
+
+
+@dataclass
+class HybridResult:
+    """A single result after RRF merge (and optionally reranking)."""
+
+    id: str
+    document: str
+    metadata: dict
+    rrf_score: float
+    rerank_score: float | None = field(default=None)
+
+    def __repr__(self) -> str:
+        slug = self.metadata.get("work_slug", "?")
+        aph = self.metadata.get("aphorism_number", "?")
+        rerank = f", rerank={self.rerank_score:.4f}" if self.rerank_score is not None else ""
+        return (
+            f"HybridResult(id={self.id!r}, work={slug!r}, §{aph}, "
+            f"rrf={self.rrf_score:.4f}{rerank})"
+        )
+
+
+# ── RRF merge ─────────────────────────────────────────────────────────────────
+
+
+def reciprocal_rank_fusion(
+    dense_results: list[DenseResult],
+    sparse_results: list[SparseResult],
+    k: int = config.RRF_K,
+) -> list[HybridResult]:
+    """Merge dense and sparse results using Reciprocal Rank Fusion.
+
+    For each document, its RRF score is the sum of ``1 / (k + rank)`` across
+    every result list it appears in (1-indexed rank).  Documents that appear
+    in both lists get contributions from both, naturally surfacing results
+    that are strong in at least one modality.
+
+    Args:
+        dense_results: Ranked list from :func:`dense_search` (closest first).
+        sparse_results: Ranked list from :class:`BM25Index` (highest score first).
+        k: RRF smoothing constant (default 60, per the original paper).
+
+    Returns:
+        List of :class:`HybridResult` sorted by descending RRF score.
+    """
+    scores: dict[str, float] = {}
+    # id → (document, metadata) for reconstruction
+    docs: dict[str, tuple[str, dict]] = {}
+
+    for rank, r in enumerate(dense_results, start=1):
+        scores[r.id] = scores.get(r.id, 0.0) + 1.0 / (k + rank)
+        docs[r.id] = (r.document, r.metadata)
+
+    for rank, r in enumerate(sparse_results, start=1):
+        scores[r.id] = scores.get(r.id, 0.0) + 1.0 / (k + rank)
+        docs[r.id] = (r.document, r.metadata)
+
+    return [
+        HybridResult(
+            id=doc_id,
+            document=docs[doc_id][0],
+            metadata=docs[doc_id][1],
+            rrf_score=score,
+        )
+        for doc_id, score in sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    ]
+
+
+# ── Cross-encoder reranking ───────────────────────────────────────────────────
+
+
+def rerank(
+    query: str,
+    results: list[HybridResult],
+    top_n: int = config.RERANK_TOP_N,
+    model_name: str = config.RERANKER_MODEL,
+) -> list[HybridResult]:
+    """Rerank *results* with a cross-encoder and return the top *top_n*.
+
+    The cross-encoder scores each (query, document) pair jointly, which is
+    more accurate than embedding-based similarity but more expensive.  We only
+    apply it to the small merged candidate set from RRF.
+
+    Args:
+        query: The user's natural-language question.
+        results: Candidate list from :func:`reciprocal_rank_fusion`.
+        top_n: Number of results to return after reranking.
+        model_name: HuggingFace cross-encoder model identifier.
+
+    Returns:
+        Top *top_n* :class:`HybridResult` objects sorted by descending
+        rerank score, with ``rerank_score`` populated.
+    """
+    if not results:
+        return []
+
+    model = CrossEncoder(model_name)
+    pairs = [(query, r.document) for r in results]
+    scores: list[float] = model.predict(pairs).tolist()
+
+    for result, score in zip(results, scores):
+        result.rerank_score = score
+
+    ranked = sorted(results, key=lambda r: r.rerank_score, reverse=True)  # type: ignore[arg-type]
+    return ranked[:top_n]
+
+
+# ── End-to-end hybrid search ──────────────────────────────────────────────────
+
+
+def hybrid_search(
+    query: str,
+    *,
+    persist_dir: Path = config.CHROMA_PERSIST_DIR,
+    collection_name: str = config.COLLECTION_NAME,
+    embedding_model: str = config.EMBEDDING_MODEL,
+    reranker_model: str = config.RERANKER_MODEL,
+    dense_top_k: int = config.DENSE_TOP_K,
+    sparse_top_k: int = config.SPARSE_TOP_K,
+    rrf_k: int = config.RRF_K,
+    top_n: int = config.RERANK_TOP_N,
+    where: dict | None = None,
+    bm25_index: BM25Index | None = None,
+) -> list[HybridResult]:
+    """Run full hybrid retrieval pipeline for *query*.
+
+    Pipeline:
+    1. Dense search via ChromaDB (``dense_top_k`` results).
+    2. BM25 sparse search over all corpus documents (``sparse_top_k`` results).
+    3. RRF merge of both lists.
+    4. Cross-encoder reranking → top ``top_n`` results.
+
+    Args:
+        query: Natural-language question.
+        persist_dir: ChromaDB persistence directory.
+        collection_name: ChromaDB collection name.
+        embedding_model: SentenceTransformer model for dense search.
+        reranker_model: Cross-encoder model for reranking.
+        dense_top_k: Number of dense candidates.
+        sparse_top_k: Number of sparse candidates.
+        rrf_k: RRF smoothing constant.
+        top_n: Number of final results after reranking.
+        where: Optional ChromaDB metadata filter for dense search.
+        bm25_index: Pre-built :class:`BM25Index`.  If *None*, all documents
+            are fetched from ChromaDB and a fresh index is built.
+
+    Returns:
+        Top *top_n* :class:`HybridResult` objects sorted by rerank score.
+    """
+    import chromadb as _chromadb
+    from ingest.embed import get_chroma_collection
+
+    # ── 1. Dense search ───────────────────────────────────────────────────────
+    dense_results = dense_search(
+        query,
+        persist_dir=persist_dir,
+        collection_name=collection_name,
+        model_name=embedding_model,
+        top_k=dense_top_k,
+        where=where,
+    )
+
+    # ── 2. Sparse search ─────────────────────────────────────────────────────
+    if bm25_index is None:
+        col = get_chroma_collection(persist_dir, collection_name)
+        data = col.get(include=["documents", "metadatas"])
+        bm25_index = BM25Index(
+            ids=data["ids"],
+            documents=data["documents"],
+            metadatas=data["metadatas"],
+        )
+
+    sparse_results = bm25_index.search(query, top_k=sparse_top_k)
+
+    # ── 3. RRF merge ─────────────────────────────────────────────────────────
+    merged = reciprocal_rank_fusion(dense_results, sparse_results, k=rrf_k)
+
+    # ── 4. Rerank ─────────────────────────────────────────────────────────────
+    return rerank(query, merged, top_n=top_n, model_name=reranker_model)
