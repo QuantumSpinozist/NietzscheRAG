@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+import threading
+
+from fastapi import APIRouter, BackgroundTasks, Depends
 
 import config
 from api.dependencies import verify_ingest_token
@@ -33,10 +35,14 @@ def run_ingest() -> int:
 
 
 @router.post("/ingest")
-async def ingest_endpoint(_: None = Depends(verify_ingest_token)) -> dict:
-    """Re-ingest all available works into the vector store.
+async def ingest_endpoint(
+    background_tasks: BackgroundTasks,
+    _: None = Depends(verify_ingest_token),
+) -> dict:
+    """Re-ingest all available works into the vector store (runs in background).
 
+    Returns immediately with ``{"status": "started"}`` while ingestion proceeds.
     Requires the ``X-Ingest-Token`` header matching ``INGEST_TOKEN`` env var.
     """
-    chunks_written = run_ingest()
-    return {"status": "ok", "chunks_written": chunks_written}
+    background_tasks.add_task(run_ingest)
+    return {"status": "started"}

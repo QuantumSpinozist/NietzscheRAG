@@ -60,3 +60,9 @@ app.add_middleware(
 
 app.include_router(query.router)
 app.include_router(ingest.router)
+
+
+@app.get("/health")
+async def health() -> dict:
+    """Liveness probe for Fly.io health checks."""
+    return {"status": "ok"}

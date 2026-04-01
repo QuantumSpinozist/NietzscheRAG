@@ -142,12 +142,7 @@ class TestIngestEndpoint:
         res = client.post("/ingest", headers={"X-Ingest-Token": "test-token"})
         assert res.status_code == 200
 
-    def test_valid_token_returns_chunks_written(self, client, mocker) -> None:
+    def test_valid_token_returns_status_started(self, client, mocker) -> None:
         mocker.patch("api.routes.ingest.run_ingest", return_value=42)
         res = client.post("/ingest", headers={"X-Ingest-Token": "test-token"})
-        assert res.json()["chunks_written"] == 42
-
-    def test_valid_token_returns_status_ok(self, client, mocker) -> None:
-        mocker.patch("api.routes.ingest.run_ingest", return_value=0)
-        res = client.post("/ingest", headers={"X-Ingest-Token": "test-token"})
-        assert res.json()["status"] == "ok"
+        assert res.json()["status"] == "started"
