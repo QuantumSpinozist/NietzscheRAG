@@ -8,7 +8,14 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 
 from ingest.chunk import Chunk
-from ingest.embed import _chunk_id, _chunk_metadata, embed_chunks, get_chroma_collection
+from ingest.embed import (
+    WORK_END_BEFORE,
+    WORK_REGISTRY,
+    _chunk_id,
+    _chunk_metadata,
+    embed_chunks,
+    get_chroma_collection,
+)
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -280,3 +287,99 @@ class TestEmbedChunks:
 
         assert mock_fn.call_args.kwargs.get("collection_name") == "my_col" or \
                mock_fn.call_args.args[1] == "my_col"
+
+
+# ── WORK_REGISTRY coverage ────────────────────────────────────────────────────
+
+EXPECTED_REGISTRY_SLUGS = {
+    # Late period
+    "beyond_good_and_evil",
+    "genealogy_of_morality",
+    "twilight_of_the_idols",
+    "the_antichrist",
+    "ecce_homo",
+    "nietzsche_contra_wagner",
+    # Middle period
+    "the_gay_science",
+    "daybreak",
+    "human_all_too_human",
+    # Early period
+    "birth_of_tragedy",
+    "untimely_meditations_1",
+    "untimely_meditations_2",
+}
+
+VALID_PERIODS = {"early", "middle", "late"}
+VALID_STYLES = {"aphorism", "paragraph"}
+
+
+class TestWorkRegistry:
+    def test_all_expected_slugs_present(self) -> None:
+        missing = EXPECTED_REGISTRY_SLUGS - set(WORK_REGISTRY)
+        assert not missing, f"Missing slugs in WORK_REGISTRY: {missing}"
+
+    def test_each_entry_has_three_fields(self) -> None:
+        for slug, entry in WORK_REGISTRY.items():
+            assert len(entry) == 3, f"{slug}: expected (title, period, style), got {entry!r}"
+
+    def test_titles_are_non_empty_strings(self) -> None:
+        for slug, (title, _, _) in WORK_REGISTRY.items():
+            assert isinstance(title, str) and title, f"{slug}: empty or non-string title"
+
+    def test_periods_are_valid(self) -> None:
+        for slug, (_, period, _) in WORK_REGISTRY.items():
+            assert period in VALID_PERIODS, f"{slug}: invalid period {period!r}"
+
+    def test_chunk_styles_are_valid(self) -> None:
+        for slug, (_, _, style) in WORK_REGISTRY.items():
+            assert style in VALID_STYLES, f"{slug}: invalid chunk style {style!r}"
+
+    def test_late_period_works_registered(self) -> None:
+        late = {s for s, (_, p, _) in WORK_REGISTRY.items() if p == "late"}
+        assert late >= {
+            "beyond_good_and_evil", "genealogy_of_morality", "twilight_of_the_idols",
+            "the_antichrist", "ecce_homo", "nietzsche_contra_wagner",
+        }
+
+    def test_middle_period_works_registered(self) -> None:
+        middle = {s for s, (_, p, _) in WORK_REGISTRY.items() if p == "middle"}
+        assert middle >= {"the_gay_science", "daybreak", "human_all_too_human"}
+
+    def test_early_period_works_registered(self) -> None:
+        early = {s for s, (_, p, _) in WORK_REGISTRY.items() if p == "early"}
+        assert early >= {"birth_of_tragedy", "untimely_meditations_1", "untimely_meditations_2"}
+
+    def test_twilight_uses_paragraph_style(self) -> None:
+        """TI has non-unique local aphorism numbers — must use paragraph chunking."""
+        _, _, style = WORK_REGISTRY["twilight_of_the_idols"]
+        assert style == "paragraph"
+
+    def test_prose_works_use_paragraph_style(self) -> None:
+        prose_slugs = {
+            "genealogy_of_morality", "twilight_of_the_idols", "ecce_homo",
+            "birth_of_tragedy", "untimely_meditations_1", "untimely_meditations_2",
+        }
+        for slug in prose_slugs:
+            _, _, style = WORK_REGISTRY[slug]
+            assert style == "paragraph", f"{slug}: expected paragraph, got {style!r}"
+
+
+# ── WORK_END_BEFORE ───────────────────────────────────────────────────────────
+
+
+class TestWorkEndBefore:
+    def test_twilight_has_end_before_entry(self) -> None:
+        """PG 52263 bundles TI + The Antichrist — truncation marker must be set."""
+        assert "twilight_of_the_idols" in WORK_END_BEFORE
+
+    def test_twilight_marker_targets_antichrist_body(self) -> None:
+        marker = WORK_END_BEFORE["twilight_of_the_idols"]
+        assert "ANTICHRIST" in marker.upper()
+
+    def test_all_end_before_slugs_are_in_registry(self) -> None:
+        for slug in WORK_END_BEFORE:
+            assert slug in WORK_REGISTRY, f"WORK_END_BEFORE slug {slug!r} not in WORK_REGISTRY"
+
+    def test_all_end_before_values_are_non_empty_strings(self) -> None:
+        for slug, marker in WORK_END_BEFORE.items():
+            assert isinstance(marker, str) and marker, f"{slug}: empty or non-string marker"
