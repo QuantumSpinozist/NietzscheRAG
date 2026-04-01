@@ -403,23 +403,23 @@ Build in this sequence — each step is independently testable:
 9. `generation/claude.py` — prompt builder + Claude call ✓
 10. `app.py` — CLI ✓
 
-**Next — API backend:**
-11. `api/models.py` — Pydantic schemas for request/response
-12. `api/dependencies.py` — shared dependencies (ingest auth header)
-13. `api/routes/query.py` — `POST /query` route
-14. `api/routes/ingest.py` — `POST /ingest` route (protected)
-15. `api/main.py` — mount routers, CORS, lifespan
-16. `tests/test_api.py` — FastAPI TestClient tests
-17. Deploy to Fly.io (see Deployment section)
+**API backend (completed):**
+11. `api/models.py` — Pydantic schemas for request/response ✓
+12. `api/dependencies.py` — shared dependencies (ingest auth header) ✓
+13. `api/routes/query.py` — `POST /query` route ✓
+14. `api/routes/ingest.py` — `POST /ingest` route (protected, background task) ✓
+15. `api/main.py` — mount routers, CORS, lifespan, `/health` endpoint ✓
+16. `tests/test_api.py` — FastAPI TestClient tests ✓
+17. Deploy to Fly.io ✓ — live at https://nietzsche-rag.fly.dev
 
-**Then — Frontend:**
-18. Scaffold Next.js app in `frontend/`
-19. `components/SourceCard.tsx` — cited passage display
-20. `components/FilterBar.tsx` — period + work filter dropdowns
-21. `components/MessageList.tsx` + `ChatInput.tsx` — chat UI
-22. `app/page.tsx` — wire everything together
-23. `app/api/query/route.ts` — proxy route to FastAPI backend
-24. Deploy to Vercel (see Deployment section)
+**Frontend (completed):**
+18. Scaffold Next.js 14 app in `frontend/` ✓
+19. `components/SourceCard.tsx` — cited passage display ✓
+20. `components/FilterBar.tsx` — period + work filter dropdowns ✓
+21. `components/MessageList.tsx` + `ChatInput.tsx` — chat UI ✓
+22. `app/page.tsx` — wire everything together ✓
+23. `app/api/query/route.ts` — proxy route to FastAPI backend ✓
+24. Deploy to Vercel (pending)
 
 Do not move to step N+1 until step N has a passing smoke test.
 
