@@ -27,8 +27,15 @@ _END_SECONDARY_RE = re.compile(r"\nEnd of Project Gutenberg[^\n]*\n", re.IGNOREC
 
 # ── Section detection ─────────────────────────────────────────────────────────
 
-# "42. Some text" at the very start of a line (requires non-whitespace after)
-_APHORISM_RE = re.compile(r"^(\d+)\.\s+\S", re.MULTILINE)
+# "42. Some text" — optionally preceded by horizontal whitespace (spaces/tabs).
+# The Oscar Levy editions (Gay Science, Human All Too Human…) centre the number
+# on the page with indentation, then put the content on the next line after a
+# blank, so "\s+\S" must be able to span newlines.
+_APHORISM_RE = re.compile(r"^[ \t]*(\d+)\.\s+\S", re.MULTILINE)
+
+# Numbers that are almost certainly publication years or page numbers rather
+# than aphorism numbers.  No single Nietzsche work has 1000+ numbered sections.
+_MAX_APHORISM_NUMBER = 999
 
 # "CHAPTER IV. TITLE" or "CHAPTER IV:" — Roman numeral up to 6 chars
 _CHAPTER_RE = re.compile(
@@ -156,7 +163,9 @@ def chunk_aphoristic(
         (m.start(), _roman_to_int(m.group(1))) for m in _CHAPTER_RE.finditer(text)
     )
     aphorism_events: list[tuple[int, int]] = [
-        (m.start(), int(m.group(1))) for m in _APHORISM_RE.finditer(text)
+        (m.start(), int(m.group(1)))
+        for m in _APHORISM_RE.finditer(text)
+        if int(m.group(1)) <= _MAX_APHORISM_NUMBER
     ]
 
     def _chapter_at(pos: int) -> int:
@@ -321,6 +330,7 @@ def chunk_work(
     min_aphorism_tokens: int = 50,
     target_prose_tokens: int = 300,
     overlap_tokens: int = 100,
+    end_before: str | None = None,
 ) -> list[Chunk]:
     """Strip Gutenberg boilerplate and chunk a Nietzsche work.
 
@@ -334,11 +344,18 @@ def chunk_work(
         min_aphorism_tokens: Minimum token count before merging short aphorisms.
         target_prose_tokens: Target token count for prose chunks.
         overlap_tokens: Token overlap between consecutive prose chunks.
+        end_before: If given, the stripped text is truncated at the first
+            occurrence of this string.  Use this when a single Gutenberg file
+            bundles multiple works (e.g. TI + The Antichrist in PG 52263).
 
     Returns:
         List of :class:`Chunk` objects ready for embedding.
     """
     clean = strip_gutenberg_boilerplate(text)
+    if end_before:
+        idx = clean.find(end_before)
+        if idx != -1:
+            clean = clean[:idx]
     console.print(
         f"[cyan]Chunking[/cyan] {work_title!r} as [bold]{chunk_style}[/bold] "
         f"({_token_count(clean):,} tokens after boilerplate strip)"

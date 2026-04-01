@@ -10,11 +10,65 @@ from rich.console import Console
 
 console = Console(stderr=True)
 
-# Gutenberg plain-text URLs keyed by output slug
+# Gutenberg plain-text URLs keyed by output slug.
+# Format: slug → (human title, plain-text cache URL)
 GUTENBERG_SOURCES: dict[str, tuple[str, str]] = {
+    # ── Late period ───────────────────────────────────────────────────────────
     "beyond_good_and_evil": (
         "Beyond Good and Evil",
         "https://www.gutenberg.org/cache/epub/4363/pg4363.txt",
+    ),
+    "genealogy_of_morality": (
+        "On the Genealogy of Morality",
+        "https://www.gutenberg.org/cache/epub/52319/pg52319.txt",
+    ),
+    "twilight_of_the_idols": (
+        "Twilight of the Idols",
+        "https://www.gutenberg.org/cache/epub/52263/pg52263.txt",
+    ),
+    "the_antichrist": (
+        "The Antichrist",
+        "https://www.gutenberg.org/cache/epub/19322/pg19322.txt",
+    ),
+    "ecce_homo": (
+        "Ecce Homo",
+        "https://www.gutenberg.org/cache/epub/52190/pg52190.txt",
+    ),
+    "nietzsche_contra_wagner": (
+        "Nietzsche contra Wagner",
+        # PG 25012 bundles The Case of Wagner + Nietzsche contra Wagner +
+        # Selected Aphorisms — all Nietzsche, suitable as one corpus file.
+        "https://www.gutenberg.org/cache/epub/25012/pg25012.txt",
+    ),
+    # ── Middle period ─────────────────────────────────────────────────────────
+    "the_gay_science": (
+        "The Gay Science",
+        "https://www.gutenberg.org/cache/epub/52881/pg52881.txt",
+    ),
+    "daybreak": (
+        "Daybreak",
+        "https://www.gutenberg.org/cache/epub/39955/pg39955.txt",
+    ),
+    "human_all_too_human": (
+        "Human, All Too Human",
+        "https://www.gutenberg.org/cache/epub/51935/pg51935.txt",
+    ),
+    # ── Early period ──────────────────────────────────────────────────────────
+    "birth_of_tragedy": (
+        "The Birth of Tragedy",
+        "https://www.gutenberg.org/cache/epub/51356/pg51356.txt",
+    ),
+    "untimely_meditations_1": (
+        "Untimely Meditations I–II",
+        # PG 51710: "Thoughts Out of Season" Part I
+        # (David Strauss + Use and Abuse of History)
+        "https://www.gutenberg.org/cache/epub/51710/pg51710.txt",
+    ),
+    "untimely_meditations_2": (
+        "Untimely Meditations III–IV",
+        # PG 38226: "Thoughts Out of Season" Part II
+        # (Schopenhauer as Educator + Wagner in Bayreuth)
+        "https://www.gutenberg.org/cache/epub/38226/pg38226.txt",
     ),
 }
 

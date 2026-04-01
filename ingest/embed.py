@@ -25,15 +25,32 @@ console = Console(stderr=True)
 
 # Metadata for every supported work: slug → (title, period, chunk_style)
 WORK_REGISTRY: dict[str, tuple[str, str, str]] = {
+    # ── Late period ───────────────────────────────────────────────────────────
     "beyond_good_and_evil": ("Beyond Good and Evil", "late", "aphorism"),
     "genealogy_of_morality": ("On the Genealogy of Morality", "late", "paragraph"),
-    "twilight_of_the_idols": ("Twilight of the Idols", "late", "aphorism"),
+    # PG 52263 bundles TI + The Antichrist; paragraph style + WORK_END_BEFORE truncation.
+    "twilight_of_the_idols": ("Twilight of the Idols", "late", "paragraph"),
     "the_antichrist": ("The Antichrist", "late", "aphorism"),
     "ecce_homo": ("Ecce Homo", "late", "paragraph"),
+    # PG 25012 bundles The Case of Wagner + NCW + Selected Aphorisms.
+    "nietzsche_contra_wagner": ("Nietzsche contra Wagner", "late", "aphorism"),
+    # ── Middle period ─────────────────────────────────────────────────────────
     "the_gay_science": ("The Gay Science", "middle", "aphorism"),
     "daybreak": ("Daybreak", "middle", "aphorism"),
     "human_all_too_human": ("Human, All Too Human", "middle", "aphorism"),
+    # ── Early period ──────────────────────────────────────────────────────────
     "birth_of_tragedy": ("The Birth of Tragedy", "early", "paragraph"),
+    # PG 51710: Thoughts Out of Season Part I (David Strauss + Use/Abuse of History)
+    "untimely_meditations_1": ("Untimely Meditations I–II", "early", "paragraph"),
+    # PG 38226: Thoughts Out of Season Part II (Schopenhauer as Educator + Wagner)
+    "untimely_meditations_2": ("Untimely Meditations III–IV", "early", "paragraph"),
+}
+
+# Works whose Gutenberg file bundles multiple texts.  chunk_work() truncates
+# the stripped body at the first occurrence of this string so only the
+# intended work is chunked.
+WORK_END_BEFORE: dict[str, str] = {
+    "twilight_of_the_idols": "THE ANTICHRIST\n\nAn Attempted Criticism",
 }
 
 
@@ -204,7 +221,8 @@ def main(argv: list[str] | None = None) -> None:
     console.print(f"  source : {raw_path}")
 
     text = raw_path.read_text(encoding="utf-8")
-    chunks = chunk_work(text, title, slug, period, chunk_style)
+    end_before = WORK_END_BEFORE.get(slug)
+    chunks = chunk_work(text, title, slug, period, chunk_style, end_before=end_before)
     console.print(f"  chunks : {len(chunks)}")
 
     embed_chunks(

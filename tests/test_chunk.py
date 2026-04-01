@@ -8,6 +8,7 @@ import pytest
 
 from ingest.chunk import (
     Chunk,
+    _MAX_APHORISM_NUMBER,
     _roman_to_int,
     _tail_tokens,
     _token_count,
@@ -67,6 +68,38 @@ Some header text here.
 This is the actual content of the work.
 *** END OF THE PROJECT GUTENBERG EBOOK FOOBAR ***
 Some footer text here.
+"""
+
+# Gay Science / Oscar Levy edition: numbers are centred on the page with
+# heavy indentation, followed by a period, then the content on the next line.
+GS_STYLE_TEXT = """\
+                                   1.
+
+The teachers of the object of existence find men always at one problem.
+They find something remarkable about the human species.
+
+                                   2.
+
+Whether I look with good or evil eye upon men, I find them always
+at the same problem. To do that which conduces to the conservation.
+
+                                   3.
+
+It will be surmised that I should not like to take leave ungratefully
+of that period of severe sickness. A philosopher has the duty.
+"""
+
+# A file that contains two works concatenated — like PG 52263 (TI + Antichrist).
+COMBINED_TEXT = """\
+FIRST WORK
+
+1. The first aphorism of the first work is here and has enough tokens.
+
+2. The second aphorism of the first work also has sufficient tokens here.
+
+SECOND WORK
+
+1. This aphorism belongs to the second work and should be excluded.
 """
 
 
@@ -346,6 +379,190 @@ class TestChunkWork:
             assert c.work_title == "Beyond Good and Evil"
             assert c.work_slug == "beyond_good_and_evil"
             assert c.work_period == "late"
+
+
+# ── Indented-number format (Gay Science / Oscar Levy) ─────────────────────────
+
+
+class TestIndentedAphorismFormat:
+    """The Oscar Levy editions centre section numbers on the page with heavy
+    indentation followed by a period.  The current regex must detect these."""
+
+    def test_indented_numbers_produce_chunks(self) -> None:
+        chunks = chunk_aphoristic(GS_STYLE_TEXT, "GS", "the_gay_science", "middle", min_tokens=0)
+        aph_nums = [c.aphorism_number for c in chunks if c.aphorism_number is not None]
+        assert aph_nums == [1, 2, 3]
+
+    def test_content_preserved_after_indented_number(self) -> None:
+        chunks = chunk_aphoristic(GS_STYLE_TEXT, "GS", "the_gay_science", "middle", min_tokens=0)
+        aph1 = next(c for c in chunks if c.aphorism_number == 1)
+        assert "teachers of the object" in aph1.content.lower()
+
+    def test_no_empty_chunks_from_indented_format(self) -> None:
+        chunks = chunk_aphoristic(GS_STYLE_TEXT, "GS", "the_gay_science", "middle", min_tokens=0)
+        for c in chunks:
+            assert c.content.strip() != ""
+
+
+# ── Year / large-number false-positive filtering ───────────────────────────────
+
+
+class TestAphorismNumberFilter:
+    def test_max_aphorism_number_constant_is_reasonable(self) -> None:
+        assert 500 < _MAX_APHORISM_NUMBER < 2000
+
+    def test_year_not_treated_as_aphorism(self) -> None:
+        """A line like '1878. A comparison ...' must not produce a chunk."""
+        text = (
+            "1. A real aphorism with enough tokens to pass the minimum check here.\n\n"
+            "1878. A comparison of the books will show that the two years of "
+            "meditation intervening had brought about a complete change in style.\n\n"
+            "2. Another real aphorism with enough tokens to pass the minimum check.\n\n"
+        )
+        chunks = chunk_aphoristic(text, "HH", "human_all_too_human", "middle", min_tokens=0)
+        aphs = [c.aphorism_number for c in chunks if c.aphorism_number is not None]
+        assert 1878 not in aphs
+        assert 1 in aphs
+        assert 2 in aphs
+
+    def test_numbers_up_to_max_accepted(self) -> None:
+        """Aphorism numbers up to _MAX_APHORISM_NUMBER are accepted."""
+        text = f"1. First aphorism with plenty of tokens to be counted correctly.\n\n"
+        text += f"{_MAX_APHORISM_NUMBER}. Last valid aphorism with plenty of tokens here.\n\n"
+        chunks = chunk_aphoristic(text, "W", "w", "middle", min_tokens=0)
+        aphs = [c.aphorism_number for c in chunks if c.aphorism_number is not None]
+        assert _MAX_APHORISM_NUMBER in aphs
+
+
+# ── end_before truncation ─────────────────────────────────────────────────────
+
+
+class TestEndBefore:
+    def test_truncates_at_marker(self) -> None:
+        chunks = chunk_work(
+            COMBINED_TEXT, "First Work", "first_work", "late", "aphorism",
+            min_aphorism_tokens=0,
+            end_before="SECOND WORK",
+        )
+        for c in chunks:
+            assert "SECOND WORK" not in c.content
+            assert "belongs to the second work" not in c.content
+
+    def test_first_work_chunks_still_present(self) -> None:
+        chunks = chunk_work(
+            COMBINED_TEXT, "First Work", "first_work", "late", "aphorism",
+            min_aphorism_tokens=0,
+            end_before="SECOND WORK",
+        )
+        aphs = [c.aphorism_number for c in chunks if c.aphorism_number is not None]
+        assert 1 in aphs
+        assert 2 in aphs
+
+    def test_missing_marker_chunks_full_text(self) -> None:
+        """If end_before string is not found, the whole text is chunked."""
+        chunks = chunk_work(
+            COMBINED_TEXT, "W", "w", "late", "aphorism",
+            min_aphorism_tokens=0,
+            end_before="NONEXISTENT MARKER XYZ",
+        )
+        # Both §1 entries from FIRST WORK and SECOND WORK are present
+        aphs = [c.aphorism_number for c in chunks if c.aphorism_number is not None]
+        assert len(aphs) >= 2
+
+    def test_end_before_none_no_effect(self) -> None:
+        """end_before=None must not alter chunking behaviour."""
+        chunks_default = chunk_work(
+            COMBINED_TEXT, "W", "w", "late", "aphorism",
+            min_aphorism_tokens=0,
+        )
+        chunks_none = chunk_work(
+            COMBINED_TEXT, "W", "w", "late", "aphorism",
+            min_aphorism_tokens=0,
+            end_before=None,
+        )
+        assert len(chunks_default) == len(chunks_none)
+
+
+# ── Per-work smoke tests (require downloaded raw files) ───────────────────────
+
+
+def _smoke(slug: str, style: str, min_chunks: int, max_aphorism: int | None = None):
+    """Helper: chunk a real file and run basic sanity checks."""
+    from ingest.embed import WORK_END_BEFORE, WORK_REGISTRY
+    path = Path(f"data/raw/{slug}.txt")
+    if not path.exists():
+        pytest.skip(f"Raw file not present: {path}")
+    title, period, _ = WORK_REGISTRY[slug]
+    end_before = WORK_END_BEFORE.get(slug)
+    chunks = chunk_work(
+        path.read_text(encoding="utf-8"),
+        title, slug, period, style,
+        end_before=end_before,
+    )
+    assert len(chunks) >= min_chunks, f"{slug}: expected ≥{min_chunks} chunks, got {len(chunks)}"
+    for c in chunks:
+        assert c.content.strip(), f"{slug}: empty chunk at index {c.chunk_index}"
+        assert "Project Gutenberg" not in c.content
+        assert "START OF" not in c.content
+    if max_aphorism is not None:
+        bad = [c.aphorism_number for c in chunks if c.aphorism_number and c.aphorism_number > max_aphorism]
+        assert not bad, f"{slug}: aphorism numbers > {max_aphorism}: {bad[:5]}"
+    return chunks
+
+
+class TestCorpusSmokeTests:
+    def test_beyond_good_and_evil(self) -> None:
+        chunks = _smoke("beyond_good_and_evil", "aphorism", 200, max_aphorism=999)
+        aphs = {c.aphorism_number for c in chunks if c.aphorism_number}
+        assert max(aphs) <= 296
+
+    def test_genealogy_of_morality(self) -> None:
+        _smoke("genealogy_of_morality", "paragraph", 150)
+
+    def test_twilight_of_the_idols(self) -> None:
+        chunks = _smoke("twilight_of_the_idols", "paragraph", 100)
+        # The opening sentence of The Antichrist body must not appear in any chunk.
+        # (The phrase "An Attempted Criticism of Christianity" appears earlier in
+        # TI's translator preface as a description, so we use the Antichrist's
+        # own opening line instead.)
+        for c in chunks:
+            assert "This book belongs to the very few" not in c.content
+
+    def test_the_antichrist(self) -> None:
+        chunks = _smoke("the_antichrist", "aphorism", 50, max_aphorism=999)
+        aphs = {c.aphorism_number for c in chunks if c.aphorism_number}
+        assert max(aphs) <= 62
+
+    def test_ecce_homo(self) -> None:
+        _smoke("ecce_homo", "paragraph", 100)
+
+    def test_nietzsche_contra_wagner(self) -> None:
+        _smoke("nietzsche_contra_wagner", "aphorism", 30, max_aphorism=999)
+
+    def test_the_gay_science(self) -> None:
+        chunks = _smoke("the_gay_science", "aphorism", 300, max_aphorism=999)
+        aphs = {c.aphorism_number for c in chunks if c.aphorism_number}
+        # GS has aphorisms up to 383 (including preface / prelude sections)
+        assert max(aphs) <= 999
+
+    def test_daybreak(self) -> None:
+        chunks = _smoke("daybreak", "aphorism", 400, max_aphorism=999)
+        aphs = {c.aphorism_number for c in chunks if c.aphorism_number}
+        assert max(aphs) <= 575
+
+    def test_human_all_too_human(self) -> None:
+        chunks = _smoke("human_all_too_human", "aphorism", 400, max_aphorism=999)
+        aphs = {c.aphorism_number for c in chunks if c.aphorism_number}
+        assert max(aphs) <= 638
+
+    def test_birth_of_tragedy(self) -> None:
+        _smoke("birth_of_tragedy", "paragraph", 150)
+
+    def test_untimely_meditations_1(self) -> None:
+        _smoke("untimely_meditations_1", "paragraph", 100)
+
+    def test_untimely_meditations_2(self) -> None:
+        _smoke("untimely_meditations_2", "paragraph", 100)
 
 
 # ── Smoke test on real BGE file ───────────────────────────────────────────────

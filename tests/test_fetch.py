@@ -147,3 +147,52 @@ class TestFetchAll:
             paths = fetch_all(dest_dir=tmp_path)
         stems = {p.stem for p in paths}
         assert stems == set(GUTENBERG_SOURCES.keys())
+
+
+# ---------------------------------------------------------------------------
+# GUTENBERG_SOURCES coverage — all expected works must be registered
+# ---------------------------------------------------------------------------
+
+EXPECTED_SLUGS = {
+    # Late period
+    "beyond_good_and_evil",
+    "genealogy_of_morality",
+    "twilight_of_the_idols",
+    "the_antichrist",
+    "ecce_homo",
+    "nietzsche_contra_wagner",
+    # Middle period
+    "the_gay_science",
+    "daybreak",
+    "human_all_too_human",
+    # Early period
+    "birth_of_tragedy",
+    "untimely_meditations_1",
+    "untimely_meditations_2",
+}
+
+
+class TestGutenbergSourcesCoverage:
+    def test_all_expected_slugs_present(self) -> None:
+        """Every corpus slug listed in CLAUDE.md must appear in GUTENBERG_SOURCES."""
+        missing = EXPECTED_SLUGS - set(GUTENBERG_SOURCES.keys())
+        assert not missing, f"Missing slugs: {missing}"
+
+    def test_each_entry_has_title_and_url(self) -> None:
+        """Every entry is a (title, url) 2-tuple with non-empty strings."""
+        for slug, (title, url) in GUTENBERG_SOURCES.items():
+            assert isinstance(title, str) and title, f"{slug}: empty title"
+            assert isinstance(url, str) and url.startswith("https://"), f"{slug}: bad url {url!r}"
+
+    def test_urls_point_to_gutenberg(self) -> None:
+        """All URLs are Project Gutenberg cache URLs."""
+        for slug, (_, url) in GUTENBERG_SOURCES.items():
+            assert "gutenberg.org" in url, f"{slug}: URL not on gutenberg.org"
+
+    @pytest.mark.parametrize("slug", sorted(EXPECTED_SLUGS))
+    def test_save_work_succeeds_for_slug(self, slug: str, tmp_path: Path) -> None:
+        """save_work writes a file for every expected slug (network mocked)."""
+        with patch("ingest.fetch.requests.get", return_value=_mock_response("text")):
+            out = save_work(slug, dest_dir=tmp_path)
+        assert out.exists()
+        assert out.stem == slug
