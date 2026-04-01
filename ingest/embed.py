@@ -1,9 +1,8 @@
-"""Embed Nietzsche chunks and persist them to a ChromaDB collection.
+"""Embed Nietzsche chunks and persist them to the configured vector store.
 
 CLI usage::
 
     python ingest/embed.py --work beyond_good_and_evil
-    python ingest/embed.py --work beyond_good_and_evil --collection nietzsche
 """
 
 from __future__ import annotations
@@ -12,13 +11,11 @@ import argparse
 import sys
 from pathlib import Path
 
-import chromadb
-from chromadb import Collection
 from sentence_transformers import SentenceTransformer
 from rich.console import Console
-from rich.progress import track
 
 from ingest.chunk import Chunk, chunk_work
+from retrieval.store import get_vector_store
 import config
 
 console = Console(stderr=True)
@@ -54,27 +51,6 @@ WORK_END_BEFORE: dict[str, str] = {
 }
 
 
-# ── ChromaDB helpers ──────────────────────────────────────────────────────────
-
-
-def get_chroma_collection(
-    persist_dir: Path = config.CHROMA_PERSIST_DIR,
-    collection_name: str = config.COLLECTION_NAME,
-) -> Collection:
-    """Return (or create) a persistent ChromaDB collection.
-
-    Args:
-        persist_dir: Directory where ChromaDB stores its data files.
-        collection_name: Name of the collection to get or create.
-
-    Returns:
-        A ChromaDB :class:`Collection` object.
-    """
-    persist_dir.mkdir(parents=True, exist_ok=True)
-    client = chromadb.PersistentClient(path=str(persist_dir))
-    return client.get_or_create_collection(collection_name)
-
-
 # ── Metadata serialisation ────────────────────────────────────────────────────
 
 
@@ -107,20 +83,16 @@ def _chunk_id(chunk: Chunk) -> str:
 
 def embed_chunks(
     chunks: list[Chunk],
-    persist_dir: Path = config.CHROMA_PERSIST_DIR,
-    collection_name: str = config.COLLECTION_NAME,
     model_name: str = config.EMBEDDING_MODEL,
     batch_size: int = config.EMBED_BATCH_SIZE,
 ) -> int:
-    """Embed *chunks* with a sentence-transformer and upsert into ChromaDB.
+    """Embed *chunks* with a sentence-transformer and upsert into the vector store.
 
     Existing entries with the same ID are overwritten (upsert semantics), so
     re-ingesting a work is safe.
 
     Args:
         chunks: Chunks to embed, typically the output of :func:`chunk_work`.
-        persist_dir: ChromaDB persistence directory.
-        collection_name: Target collection name.
         model_name: HuggingFace model identifier for :class:`SentenceTransformer`.
         batch_size: Number of chunks to encode and upsert per iteration.
 
@@ -131,7 +103,7 @@ def embed_chunks(
         console.print("[yellow]embed_chunks: no chunks to embed, skipping.[/yellow]")
         return 0
 
-    collection = get_chroma_collection(persist_dir, collection_name)
+    store = get_vector_store()
     console.print(f"[cyan]Loading embedding model[/cyan] {model_name!r} …")
     model = SentenceTransformer(model_name)
 
@@ -150,19 +122,18 @@ def embed_chunks(
             texts, show_progress_bar=False, convert_to_numpy=True
         ).tolist()
 
-        collection.upsert(
-            ids=[_chunk_id(c) for c in batch],
-            embeddings=embeddings,
-            documents=texts,
-            metadatas=[_chunk_metadata(c) for c in batch],
-        )
+        chunk_dicts = [
+            {"id": _chunk_id(c), "content": c.content, **_chunk_metadata(c)}
+            for c in batch
+        ]
+        store.store_chunks(chunk_dicts, embeddings)
         total += len(batch)
         console.print(
             f"  batch {i // batch_size + 1}/{n_batches} — "
             f"upserted {len(batch)} chunks (total {total})"
         )
 
-    console.print(f"[bold green]Done.[/bold green] {total} chunks in {collection_name!r}")
+    console.print(f"[bold green]Done.[/bold green] {total} chunks stored.")
     return total
 
 
@@ -171,7 +142,7 @@ def embed_chunks(
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="Embed a Nietzsche work and persist it to ChromaDB."
+        description="Embed a Nietzsche work and persist it to the configured vector store."
     )
     p.add_argument(
         "--work",
@@ -179,17 +150,6 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=list(WORK_REGISTRY),
         metavar="SLUG",
         help=f"Work slug. Choices: {', '.join(WORK_REGISTRY)}",
-    )
-    p.add_argument(
-        "--collection",
-        default=config.COLLECTION_NAME,
-        help=f"ChromaDB collection name (default: {config.COLLECTION_NAME!r})",
-    )
-    p.add_argument(
-        "--persist-dir",
-        type=Path,
-        default=config.CHROMA_PERSIST_DIR,
-        help=f"ChromaDB persistence directory (default: {config.CHROMA_PERSIST_DIR})",
     )
     p.add_argument(
         "--model",
@@ -227,8 +187,6 @@ def main(argv: list[str] | None = None) -> None:
 
     embed_chunks(
         chunks,
-        persist_dir=args.persist_dir,
-        collection_name=args.collection,
         model_name=args.model,
         batch_size=args.batch_size,
     )

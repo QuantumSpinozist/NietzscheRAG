@@ -1,5 +1,6 @@
 anthropic
 chromadb
+supabase
 sentence-transformers
 rank_bm25
 torch                        # required by sentence-transformers

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from sentence_transformers import CrossEncoder
 
@@ -126,59 +125,53 @@ def rerank(
 def hybrid_search(
     query: str,
     *,
-    persist_dir: Path = config.CHROMA_PERSIST_DIR,
-    collection_name: str = config.COLLECTION_NAME,
     embedding_model: str = config.EMBEDDING_MODEL,
     reranker_model: str = config.RERANKER_MODEL,
     dense_top_k: int = config.DENSE_TOP_K,
     sparse_top_k: int = config.SPARSE_TOP_K,
     rrf_k: int = config.RRF_K,
     top_n: int = config.RERANK_TOP_N,
-    where: dict | None = None,
+    filter_period: str | None = None,
+    filter_slug: str | None = None,
     bm25_index: BM25Index | None = None,
 ) -> list[HybridResult]:
     """Run full hybrid retrieval pipeline for *query*.
 
     Pipeline:
-    1. Dense search via ChromaDB (``dense_top_k`` results).
+    1. Dense search via the configured vector store (``dense_top_k`` results).
     2. BM25 sparse search over all corpus documents (``sparse_top_k`` results).
     3. RRF merge of both lists.
     4. Cross-encoder reranking → top ``top_n`` results.
 
     Args:
         query: Natural-language question.
-        persist_dir: ChromaDB persistence directory.
-        collection_name: ChromaDB collection name.
         embedding_model: SentenceTransformer model for dense search.
         reranker_model: Cross-encoder model for reranking.
         dense_top_k: Number of dense candidates.
         sparse_top_k: Number of sparse candidates.
         rrf_k: RRF smoothing constant.
         top_n: Number of final results after reranking.
-        where: Optional ChromaDB metadata filter for dense search.
+        filter_period: Optional period filter for dense search (e.g. ``"late"``).
+        filter_slug: Optional work slug filter for dense search.
         bm25_index: Pre-built :class:`BM25Index`.  If *None*, all documents
-            are fetched from ChromaDB and a fresh index is built.
+            are fetched from the vector store and a fresh index is built.
 
     Returns:
         Top *top_n* :class:`HybridResult` objects sorted by rerank score.
     """
-    import chromadb as _chromadb
-    from ingest.embed import get_chroma_collection
-
     # ── 1. Dense search ───────────────────────────────────────────────────────
     dense_results = dense_search(
         query,
-        persist_dir=persist_dir,
-        collection_name=collection_name,
         model_name=embedding_model,
         top_k=dense_top_k,
-        where=where,
+        filter_period=filter_period,
+        filter_slug=filter_slug,
     )
 
     # ── 2. Sparse search ─────────────────────────────────────────────────────
     if bm25_index is None:
-        col = get_chroma_collection(persist_dir, collection_name)
-        data = col.get(include=["documents", "metadatas"])
+        from retrieval.store import get_vector_store
+        data = get_vector_store().get_all_documents()
         bm25_index = BM25Index(
             ids=data["ids"],
             documents=data["documents"],

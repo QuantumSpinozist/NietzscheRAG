@@ -146,11 +146,10 @@ def query(
     ),
 ) -> None:
     """Ask a philosophical question and get a grounded, cited answer."""
-    import chromadb
-
     from generation.claude import generate_answer
     from retrieval.hybrid import hybrid_search
     from retrieval.sparse import BM25Index
+    from retrieval.store import get_vector_store
 
     # ── validate ──────────────────────────────────────────────────────────────
     if period and period not in ("early", "middle", "late"):
@@ -162,7 +161,7 @@ def query(
         err.print(f"Valid slugs: {', '.join(WORK_REGISTRY)}")
         raise typer.Exit(1)
 
-    if not config.CHROMA_PERSIST_DIR.exists():
+    if config.VECTOR_STORE_BACKEND == "chroma" and not config.CHROMA_PERSIST_DIR.exists():
         err.print(
             "[red]ChromaDB not found.[/red] Run [bold]python app.py ingest[/bold] first."
         )
@@ -172,27 +171,16 @@ def query(
         err.print("[red]ANTHROPIC_API_KEY not set.[/red] Add it to .env")
         raise typer.Exit(1)
 
-    # ── build where filter ────────────────────────────────────────────────────
-    where: dict | None = None
-    if period and work:
-        where = {"$and": [{"work_period": period}, {"work_slug": work}]}
-    elif period:
-        where = {"work_period": period}
-    elif work:
-        where = {"work_slug": work}
-
     # ── load corpus for BM25 ─────────────────────────────────────────────────
     try:
-        client = chromadb.PersistentClient(path=str(config.CHROMA_PERSIST_DIR))
-        col = client.get_collection(config.COLLECTION_NAME)
+        store = get_vector_store()
+        corpus = store.get_all_documents()
     except Exception as exc:
-        err.print(f"[red]Could not open collection:[/red] {exc}")
+        err.print(f"[red]Could not open vector store:[/red] {exc}")
         raise typer.Exit(1)
 
-    corpus = col.get(include=["documents", "metadatas"])
-
     # Apply period/work filter to BM25 corpus if needed
-    if where:
+    if period or work:
         filtered = [
             (id_, doc, meta)
             for id_, doc, meta in zip(
@@ -217,11 +205,10 @@ def query(
     with console.status("[cyan]Retrieving passages …[/cyan]"):
         results = hybrid_search(
             question,
-            persist_dir=config.CHROMA_PERSIST_DIR,
-            collection_name=config.COLLECTION_NAME,
             top_n=top_n,
             bm25_index=bm25,
-            where=where,
+            filter_period=period,
+            filter_slug=work,
         )
 
     if not results:

@@ -24,6 +24,9 @@ GENERATION_MODEL: str = "claude-sonnet-4-5"
 CHROMA_PERSIST_DIR: Path = Path("./data/chroma")
 COLLECTION_NAME: str = "nietzsche"
 RAW_DIR: Path = Path("./data/raw")
+VECTOR_STORE_BACKEND: str = os.getenv("VECTOR_STORE_BACKEND", "chroma")
+SUPABASE_URL: str | None = os.getenv("SUPABASE_URL")
+SUPABASE_KEY: str | None = os.getenv("SUPABASE_SERVICE_KEY")
 
 # ── Retrieval hyperparameters ─────────────────────────────────────────────────
 

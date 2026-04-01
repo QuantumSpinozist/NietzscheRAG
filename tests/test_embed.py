@@ -1,9 +1,8 @@
-"""Tests for ingest/embed.py — all model and ChromaDB calls are mocked."""
+"""Tests for ingest/embed.py — all model and vector store calls are mocked."""
 
 from __future__ import annotations
 
-from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -14,7 +13,6 @@ from ingest.embed import (
     _chunk_id,
     _chunk_metadata,
     embed_chunks,
-    get_chroma_collection,
 )
 
 
@@ -55,8 +53,6 @@ def _prose_chunk(idx: int = 0) -> Chunk:
 
 def _mock_model(embedding_dim: int = 768) -> MagicMock:
     """Fake SentenceTransformer: encode() returns a numpy-like with .tolist()."""
-    import numpy as np
-
     model = MagicMock()
     model.encode = MagicMock(
         side_effect=lambda texts, **kw: MagicMock(
@@ -115,178 +111,142 @@ class TestChunkId:
         assert _chunk_id(chunk) == _chunk_id(chunk)
 
 
-# ── get_chroma_collection ─────────────────────────────────────────────────────
-
-
-class TestGetChromaCollection:
-    def test_creates_collection(self, tmp_path: Path) -> None:
-        """get_chroma_collection returns a usable collection object."""
-        with patch("ingest.embed.chromadb.PersistentClient") as mock_client_cls:
-            mock_col = MagicMock()
-            mock_client_cls.return_value.get_or_create_collection.return_value = mock_col
-            result = get_chroma_collection(tmp_path, "test")
-        mock_client_cls.assert_called_once_with(path=str(tmp_path))
-        mock_client_cls.return_value.get_or_create_collection.assert_called_once_with("test")
-        assert result is mock_col
-
-    def test_creates_persist_dir_if_missing(self, tmp_path: Path) -> None:
-        deep = tmp_path / "a" / "b" / "chroma"
-        with patch("ingest.embed.chromadb.PersistentClient"):
-            get_chroma_collection(deep, "test")
-        assert deep.exists()
-
-
 # ── embed_chunks ──────────────────────────────────────────────────────────────
 
 
 class TestEmbedChunks:
-    def _patches(self, tmp_path: Path):
-        """Context manager that mocks both SentenceTransformer and get_chroma_collection."""
-        mock_col = MagicMock()
-        mock_model = _mock_model()
-
-        col_patch = patch("ingest.embed.get_chroma_collection", return_value=mock_col)
-        model_patch = patch("ingest.embed.SentenceTransformer", return_value=mock_model)
-        return col_patch, model_patch, mock_col, mock_model
-
     # ── as per CLAUDE.md spec ────────────────────────────────────────────────
 
-    def test_embed_calls_model(self, tmp_path: Path) -> None:
+    def test_embed_calls_model(self) -> None:
         """SentenceTransformer.encode is called with the chunk texts."""
-        mock_col = MagicMock()
+        mock_store = MagicMock()
         mock_model = _mock_model()
 
-        with patch("ingest.embed.get_chroma_collection", return_value=mock_col), \
+        with patch("ingest.embed.get_vector_store", return_value=mock_store), \
              patch("ingest.embed.SentenceTransformer", return_value=mock_model):
-            embed_chunks([_make_chunk()], persist_dir=tmp_path)
+            embed_chunks([_make_chunk()])
 
         mock_model.encode.assert_called_once()
-        # The first positional argument is the list of texts
         texts_arg = mock_model.encode.call_args[0][0]
         assert texts_arg == ["Supposing that Truth is a woman--what then?"]
 
-    def test_chunks_added_to_collection(self, tmp_path: Path) -> None:
-        """All chunks are upserted into the ChromaDB collection."""
-        mock_col = MagicMock()
+    def test_chunks_added_to_store(self) -> None:
+        """All chunks are stored via store_chunks."""
+        mock_store = MagicMock()
         mock_model = _mock_model()
 
-        with patch("ingest.embed.get_chroma_collection", return_value=mock_col), \
+        with patch("ingest.embed.get_vector_store", return_value=mock_store), \
              patch("ingest.embed.SentenceTransformer", return_value=mock_model):
-            embed_chunks([_make_chunk()], persist_dir=tmp_path)
+            embed_chunks([_make_chunk()])
 
-        mock_col.upsert.assert_called_once()
+        mock_store.store_chunks.assert_called_once()
 
     # ── additional coverage ──────────────────────────────────────────────────
 
-    def test_empty_list_returns_zero(self, tmp_path: Path) -> None:
-        with patch("ingest.embed.get_chroma_collection") as mock_col_fn, \
+    def test_empty_list_returns_zero(self) -> None:
+        with patch("ingest.embed.get_vector_store") as mock_store_fn, \
              patch("ingest.embed.SentenceTransformer"):
-            result = embed_chunks([], persist_dir=tmp_path)
+            result = embed_chunks([])
         assert result == 0
-        mock_col_fn.assert_not_called()  # no collection opened for empty input
+        mock_store_fn.assert_not_called()  # no store opened for empty input
 
-    def test_returns_count_of_chunks(self, tmp_path: Path) -> None:
+    def test_returns_count_of_chunks(self) -> None:
         chunks = [_make_chunk(idx=i) for i in range(5)]
-        mock_col = MagicMock()
+        mock_store = MagicMock()
         mock_model = _mock_model()
 
-        with patch("ingest.embed.get_chroma_collection", return_value=mock_col), \
+        with patch("ingest.embed.get_vector_store", return_value=mock_store), \
              patch("ingest.embed.SentenceTransformer", return_value=mock_model):
-            result = embed_chunks(chunks, persist_dir=tmp_path)
+            result = embed_chunks(chunks)
 
         assert result == 5
 
-    def test_upsert_ids_match_chunk_ids(self, tmp_path: Path) -> None:
+    def test_upsert_ids_match_chunk_ids(self) -> None:
         chunks = [_make_chunk(idx=0), _make_chunk(idx=1)]
-        mock_col = MagicMock()
+        mock_store = MagicMock()
         mock_model = _mock_model()
 
-        with patch("ingest.embed.get_chroma_collection", return_value=mock_col), \
+        with patch("ingest.embed.get_vector_store", return_value=mock_store), \
              patch("ingest.embed.SentenceTransformer", return_value=mock_model):
-            embed_chunks(chunks, persist_dir=tmp_path)
+            embed_chunks(chunks)
 
-        ids_passed = mock_col.upsert.call_args.kwargs["ids"]
+        chunk_dicts = mock_store.store_chunks.call_args[0][0]
+        ids_passed = [d["id"] for d in chunk_dicts]
         assert ids_passed == [_chunk_id(c) for c in chunks]
 
-    def test_upsert_documents_match_content(self, tmp_path: Path) -> None:
+    def test_upsert_documents_match_content(self) -> None:
         chunks = [_make_chunk(idx=0), _make_chunk(idx=1)]
-        mock_col = MagicMock()
+        mock_store = MagicMock()
         mock_model = _mock_model()
 
-        with patch("ingest.embed.get_chroma_collection", return_value=mock_col), \
+        with patch("ingest.embed.get_vector_store", return_value=mock_store), \
              patch("ingest.embed.SentenceTransformer", return_value=mock_model):
-            embed_chunks(chunks, persist_dir=tmp_path)
+            embed_chunks(chunks)
 
-        docs = mock_col.upsert.call_args.kwargs["documents"]
+        chunk_dicts = mock_store.store_chunks.call_args[0][0]
+        docs = [d["content"] for d in chunk_dicts]
         assert docs == [c.content for c in chunks]
 
-    def test_upsert_metadatas_have_no_none_values(self, tmp_path: Path) -> None:
+    def test_upsert_metadatas_have_no_none_values(self) -> None:
         chunks = [_make_chunk(), _prose_chunk()]
-        mock_col = MagicMock()
+        mock_store = MagicMock()
         mock_model = _mock_model()
 
-        with patch("ingest.embed.get_chroma_collection", return_value=mock_col), \
+        with patch("ingest.embed.get_vector_store", return_value=mock_store), \
              patch("ingest.embed.SentenceTransformer", return_value=mock_model):
-            embed_chunks(chunks, persist_dir=tmp_path)
+            embed_chunks(chunks)
 
-        metadatas = mock_col.upsert.call_args.kwargs["metadatas"]
+        chunk_dicts = mock_store.store_chunks.call_args[0][0]
+        metadatas = [{k: v for k, v in d.items() if k not in ("id", "content")} for d in chunk_dicts]
         for meta in metadatas:
             for v in meta.values():
                 assert v is not None
 
-    def test_batch_size_controls_upsert_calls(self, tmp_path: Path) -> None:
-        """7 chunks with batch_size=3 → 3 upsert calls (3 + 3 + 1)."""
+    def test_batch_size_controls_upsert_calls(self) -> None:
+        """7 chunks with batch_size=3 → 3 store_chunks calls (3 + 3 + 1)."""
         chunks = [_make_chunk(idx=i) for i in range(7)]
-        mock_col = MagicMock()
+        mock_store = MagicMock()
         mock_model = _mock_model()
 
-        with patch("ingest.embed.get_chroma_collection", return_value=mock_col), \
+        with patch("ingest.embed.get_vector_store", return_value=mock_store), \
              patch("ingest.embed.SentenceTransformer", return_value=mock_model):
-            embed_chunks(chunks, persist_dir=tmp_path, batch_size=3)
+            embed_chunks(chunks, batch_size=3)
 
-        assert mock_col.upsert.call_count == 3
+        assert mock_store.store_chunks.call_count == 3
 
-    def test_encode_called_once_per_batch(self, tmp_path: Path) -> None:
+    def test_encode_called_once_per_batch(self) -> None:
         chunks = [_make_chunk(idx=i) for i in range(4)]
-        mock_col = MagicMock()
+        mock_store = MagicMock()
         mock_model = _mock_model()
 
-        with patch("ingest.embed.get_chroma_collection", return_value=mock_col), \
+        with patch("ingest.embed.get_vector_store", return_value=mock_store), \
              patch("ingest.embed.SentenceTransformer", return_value=mock_model):
-            embed_chunks(chunks, persist_dir=tmp_path, batch_size=2)
+            embed_chunks(chunks, batch_size=2)
 
         assert mock_model.encode.call_count == 2
 
-    def test_embeddings_passed_to_upsert(self, tmp_path: Path) -> None:
-        """The embedding vectors returned by encode are forwarded to upsert."""
+    def test_embeddings_passed_to_store(self) -> None:
+        """The embedding vectors returned by encode are forwarded to store_chunks."""
         chunk = _make_chunk()
-        mock_col = MagicMock()
+        mock_store = MagicMock()
         mock_model = _mock_model(embedding_dim=768)
 
-        with patch("ingest.embed.get_chroma_collection", return_value=mock_col), \
+        with patch("ingest.embed.get_vector_store", return_value=mock_store), \
              patch("ingest.embed.SentenceTransformer", return_value=mock_model):
-            embed_chunks([chunk], persist_dir=tmp_path)
+            embed_chunks([chunk])
 
-        embeddings = mock_col.upsert.call_args.kwargs["embeddings"]
+        embeddings = mock_store.store_chunks.call_args[0][1]
         assert len(embeddings) == 1
         assert len(embeddings[0]) == 768
 
-    def test_model_name_passed_to_sentence_transformer(self, tmp_path: Path) -> None:
-        mock_col = MagicMock()
+    def test_model_name_passed_to_sentence_transformer(self) -> None:
+        mock_store = MagicMock()
 
-        with patch("ingest.embed.get_chroma_collection", return_value=mock_col), \
+        with patch("ingest.embed.get_vector_store", return_value=mock_store), \
              patch("ingest.embed.SentenceTransformer", return_value=_mock_model()) as mock_cls:
-            embed_chunks([_make_chunk()], persist_dir=tmp_path, model_name="custom/model")
+            embed_chunks([_make_chunk()], model_name="custom/model")
 
         mock_cls.assert_called_once_with("custom/model")
-
-    def test_collection_name_forwarded(self, tmp_path: Path) -> None:
-        with patch("ingest.embed.get_chroma_collection", return_value=MagicMock()) as mock_fn, \
-             patch("ingest.embed.SentenceTransformer", return_value=_mock_model()):
-            embed_chunks([_make_chunk()], persist_dir=tmp_path, collection_name="my_col")
-
-        assert mock_fn.call_args.kwargs.get("collection_name") == "my_col" or \
-               mock_fn.call_args.args[1] == "my_col"
 
 
 # ── WORK_REGISTRY coverage ────────────────────────────────────────────────────
