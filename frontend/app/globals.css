@@ -27,3 +27,56 @@ body {
 ::-webkit-scrollbar-track { background: var(--background); }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+/* Markdown rendered inside assistant messages */
+.prose-nietzsche { color: var(--foreground); line-height: 1.75; }
+.prose-nietzsche p { margin-bottom: 0.85em; }
+.prose-nietzsche p:last-child { margin-bottom: 0; }
+.prose-nietzsche strong { color: var(--accent); font-weight: 600; }
+.prose-nietzsche em { font-style: italic; }
+.prose-nietzsche h1,
+.prose-nietzsche h2,
+.prose-nietzsche h3 { color: var(--accent); font-weight: 700; margin: 1.1em 0 0.4em; }
+.prose-nietzsche h1 { font-size: 1.25em; }
+.prose-nietzsche h2 { font-size: 1.1em; }
+.prose-nietzsche h3 { font-size: 1em; }
+.prose-nietzsche ul,
+.prose-nietzsche ol { padding-left: 1.4em; margin-bottom: 0.85em; }
+.prose-nietzsche li { margin-bottom: 0.3em; }
+.prose-nietzsche ul li { list-style-type: disc; }
+.prose-nietzsche ol li { list-style-type: decimal; }
+.prose-nietzsche blockquote {
+  border-left: 2px solid var(--accent-dim);
+  padding-left: 1em;
+  color: var(--muted);
+  font-style: italic;
+  margin: 0.85em 0;
+}
+.prose-nietzsche code {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.875em;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  padding: 0.15em 0.35em;
+  border-radius: 3px;
+}
+.prose-nietzsche pre {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.85em 1em;
+  overflow-x: auto;
+  margin-bottom: 0.85em;
+}
+.prose-nietzsche pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.85em;
+}
+.prose-nietzsche hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1.2em 0;
+}
+.prose-nietzsche a { color: var(--accent); text-decoration: underline; }

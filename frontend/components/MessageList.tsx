@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Message } from "@/types";
 import SourceCard from "./SourceCard";
 
@@ -10,8 +12,10 @@ function AssistantMessage({ message }: { message: Message }) {
 
   return (
     <div className="space-y-3">
-      <div className="text-[var(--foreground)] leading-relaxed whitespace-pre-wrap">
-        {message.content}
+      <div className="prose-nietzsche">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          {message.content}
+        </ReactMarkdown>
       </div>
 
       {hasSources && (
