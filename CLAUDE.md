@@ -13,29 +13,54 @@ grounded, cited answers using Claude.
 ```
 nietzsche-rag/
 ├── data/
-│   └── raw/              # Plain .txt files, one per work (sourced from Gutenberg)
+│   └── raw/                  # Plain .txt files, one per work (sourced from Gutenberg)
 ├── ingest/
-│   ├── fetch.py          # Download texts from Project Gutenberg  ✓
-│   ├── chunk.py          # Aphorism-aware and paragraph-aware chunking
-│   └── embed.py          # Embed chunks and store in ChromaDB
+│   ├── fetch.py              # Download texts from Project Gutenberg
+│   ├── chunk.py              # Aphorism-aware and paragraph-aware chunking
+│   └── embed.py              # Embed chunks and write via store interface
 ├── retrieval/
-│   ├── dense.py          # Semantic vector search via ChromaDB
-│   ├── sparse.py         # BM25 keyword search via rank_bm25
-│   └── hybrid.py         # Merge dense + sparse results, then rerank
+│   ├── store.py              # Abstract VectorStore base class + get_vector_store() factory
+│   ├── chroma_store.py       # ChromaDB implementation (local dev)
+│   ├── supabase_store.py     # Supabase + pgvector implementation (production)
+│   ├── sparse.py             # BM25 keyword search via rank_bm25
+│   └── hybrid.py             # RRF merge + reranker
 ├── generation/
-│   └── claude.py         # Build prompt and call Claude API
+│   └── claude.py             # Build prompt and call Claude API
+├── api/
+│   ├── main.py               # FastAPI app — mounts all routers
+│   ├── routes/
+│   │   ├── query.py          # POST /query
+│   │   └── ingest.py         # POST /ingest  (protected)
+│   ├── models.py             # Pydantic request/response schemas
+│   └── dependencies.py       # Shared FastAPI dependencies (auth header check, etc.)
+├── frontend/                 # Next.js app (separate repo or subdirectory)
+│   ├── app/
+│   │   ├── page.tsx          # Main chat interface
+│   │   └── api/
+│   │       └── query/
+│   │           └── route.ts  # Next.js API route — proxies to FastAPI
+│   ├── components/
+│   │   ├── ChatInput.tsx
+│   │   ├── MessageList.tsx
+│   │   ├── SourceCard.tsx    # Displays cited passage + work/section metadata
+│   │   └── FilterBar.tsx     # Period + work dropdowns
+│   └── package.json
 ├── tests/
-│   ├── conftest.py       # Shared fixtures (sample chunks, mock embeddings, etc.)
-│   ├── test_fetch.py     # Fetching / download tests  ✓
-│   ├── test_chunk.py     # Chunking logic
-│   ├── test_dense.py     # Vector search (mocked ChromaDB)
-│   ├── test_sparse.py    # BM25 search
-│   ├── test_hybrid.py    # RRF merge + reranking logic
-│   └── test_generation.py  # Prompt building (no live Claude calls)
-├── app.py                # CLI entry point (typer + rich)
-├── config.py             # Central config (paths, model names, hyperparams)
+│   ├── conftest.py
+│   ├── test_chunk.py
+│   ├── test_fetch.py
+│   ├── test_store.py
+│   ├── test_sparse.py
+│   ├── test_hybrid.py
+│   ├── test_generation.py
+│   ├── test_api.py           # FastAPI route tests (TestClient, mocked pipeline)
+│   └── integration/
+│       ├── test_chroma_store.py
+│       └── test_supabase_store.py
+├── app.py                    # CLI entry point (typer + rich) — kept for local use
+├── config.py                 # Central config (paths, model names, hyperparams)
 ├── requirements.txt
-└── CLAUDE.md             # This file
+└── CLAUDE.md                 # This file
 ```
 
 ---
@@ -47,36 +72,45 @@ nietzsche-rag/
 | Data source | Project Gutenberg | Plain text, public domain |
 | Chunking | Custom Python | Aphorism-aware (see below) |
 | Embeddings | `sentence-transformers/all-mpnet-base-v2` | Local, free, 768-dim |
-| Vector store | `chromadb` | Local persistent storage |
+| Vector store (local) | `chromadb` | Used when `VECTOR_STORE_BACKEND=chroma` |
+| Vector store (prod) | Supabase + `pgvector` | Used when `VECTOR_STORE_BACKEND=supabase` |
+| Store interface | `retrieval/store.py` | Abstract base — rest of app never imports a backend directly |
 | Keyword search | `rank_bm25` | Hybrid retrieval complement |
 | Re-ranking | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Top-10 → Top-3 refinement |
 | Generation | Claude (via Anthropic SDK) | See generation instructions |
-| CLI | `typer` + `rich` | Pretty terminal interface |
+| API backend | FastAPI | Deployed on Fly.io |
+| Frontend | Next.js (App Router) | Deployed on Vercel (free hobby plan) |
+| CLI | `typer` + `rich` | Kept for local ingestion runs |
 
 ---
 
 ## Corpus
 
-Target works to ingest (in rough priority order):
+Define all works in `config.py` as a single list of dicts. This is the single source of truth
+used by `fetch.py`, `chunk.py`, and metadata tagging:
 
-**Late period (highest priority):**
-- Beyond Good and Evil (BGE)
-- On the Genealogy of Morality (GM)
-- Twilight of the Idols (TI)
-- The Antichrist (AC)
-- Ecce Homo (EH)
-- Nietzsche contra Wagner
+```python
+WORKS = [
+    # Late period
+    {"title": "Beyond Good and Evil",         "slug": "beyond_good_and_evil",       "period": "late",   "type": "aphoristic"},
+    {"title": "On the Genealogy of Morality", "slug": "genealogy_of_morality",      "period": "late",   "type": "essay"},
+    {"title": "Twilight of the Idols",        "slug": "twilight_of_the_idols",      "period": "late",   "type": "aphoristic"},
+    {"title": "The Antichrist",               "slug": "the_antichrist",             "period": "late",   "type": "essay"},
+    {"title": "Ecce Homo",                    "slug": "ecce_homo",                  "period": "late",   "type": "essay"},
+    {"title": "Nietzsche contra Wagner",      "slug": "nietzsche_contra_wagner",    "period": "late",   "type": "essay"},
+    # Middle period
+    {"title": "The Gay Science",              "slug": "the_gay_science",            "period": "middle", "type": "aphoristic"},
+    {"title": "Dawn",                         "slug": "dawn",                       "period": "middle", "type": "aphoristic"},
+    {"title": "Human, All Too Human",         "slug": "human_all_too_human",        "period": "middle", "type": "aphoristic"},
+    {"title": "Thus Spoke Zarathustra",       "slug": "thus_spoke_zarathustra",     "period": "middle", "type": "essay"},
+    # Early period
+    {"title": "The Birth of Tragedy",         "slug": "birth_of_tragedy",           "period": "early",  "type": "essay"},
+    {"title": "Untimely Meditations",         "slug": "untimely_meditations",       "period": "early",  "type": "essay"},
+]
+```
 
-**Middle period:**
-- The Gay Science (GS)
-- Dawn / Daybreak
-- Human, All Too Human
-
-**Early period:**
-- The Birth of Tragedy (BT)
-- Untimely Meditations
-
-Store each work as a `.txt` file in `data/raw/` named by slug, e.g. `beyond_good_and_evil.txt`.
+The `type` field drives chunking strategy — `aphoristic` uses aphorism-boundary chunking,
+`essay` uses paragraph chunking. Store raw texts as `data/raw/{slug}.txt`.
 
 ---
 
@@ -96,7 +130,7 @@ This is the most important part of the pipeline. Nietzsche's works fall into two
 - Overlap: ~50 tokens between chunks to preserve context across boundaries
 
 ### Metadata to store per chunk
-Every chunk must carry this metadata in ChromaDB:
+Every chunk must carry this metadata regardless of which backend is active:
 ```python
 {
     "work_title": str,          # e.g. "Beyond Good and Evil"
@@ -110,13 +144,121 @@ Every chunk must carry this metadata in ChromaDB:
 
 ---
 
+## Vector Store — Repository Pattern
+
+The app supports two vector store backends switchable via `.env`. All code outside
+`retrieval/` must use only the abstract interface — never import `ChromaStore` or
+`SupabaseStore` directly.
+
+### Abstract interface (`retrieval/store.py`)
+
+```python
+from abc import ABC, abstractmethod
+
+class VectorStore(ABC):
+
+    @abstractmethod
+    def store_chunks(self, chunks: list[dict], embeddings: list[list[float]]) -> None: ...
+
+    @abstractmethod
+    def similarity_search(
+        self,
+        query_embedding: list[float],
+        top_k: int = 10,
+        filter_period: str | None = None,
+        filter_slug: str | None = None,
+    ) -> list[dict]: ...
+
+    @abstractmethod
+    def delete_all(self) -> None: ...
+
+
+def get_vector_store() -> VectorStore:
+    """Read VECTOR_STORE_BACKEND from env and return the correct implementation."""
+    import os
+    backend = os.getenv("VECTOR_STORE_BACKEND", "chroma")
+    if backend == "supabase":
+        from retrieval.supabase_store import SupabaseStore
+        return SupabaseStore()
+    from retrieval.chroma_store import ChromaStore
+    return ChromaStore()
+```
+
+### Switching backends
+
+```bash
+# Local development (default)
+VECTOR_STORE_BACKEND=chroma
+
+# Production
+VECTOR_STORE_BACKEND=supabase
+```
+
+Supabase credentials are only required when `VECTOR_STORE_BACKEND=supabase`.
+ChromaDB requires no credentials — data persists to `CHROMA_PERSIST_DIR`.
+
+### Supabase setup
+
+Run this once in the Supabase SQL editor to create the schema:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE chunks (
+    id             BIGSERIAL PRIMARY KEY,
+    work_title     TEXT NOT NULL,
+    work_slug      TEXT NOT NULL,
+    work_period    TEXT NOT NULL,
+    chunk_type     TEXT NOT NULL,
+    section_number INT,
+    chunk_index    INT NOT NULL,
+    content        TEXT NOT NULL,
+    embedding      vector(768)
+);
+
+-- HNSW index for fast approximate nearest-neighbour search
+CREATE INDEX ON chunks USING hnsw (embedding vector_cosine_ops);
+
+-- Similarity search function called via Supabase RPC
+CREATE OR REPLACE FUNCTION match_chunks(
+    query_embedding vector(768),
+    match_count     int DEFAULT 10,
+    filter_period   text DEFAULT NULL,
+    filter_slug     text DEFAULT NULL
+)
+RETURNS TABLE (
+    id             bigint,
+    content        text,
+    work_title     text,
+    work_slug      text,
+    work_period    text,
+    section_number int,
+    chunk_type     text,
+    similarity     float
+)
+LANGUAGE sql STABLE AS $$
+    SELECT
+        id, content, work_title, work_slug,
+        work_period, section_number, chunk_type,
+        1 - (embedding <=> query_embedding) AS similarity
+    FROM chunks
+    WHERE
+        (filter_period IS NULL OR work_period = filter_period)
+        AND (filter_slug IS NULL OR work_slug = filter_slug)
+    ORDER BY embedding <=> query_embedding
+    LIMIT match_count;
+$$;
+```
+
+---
+
 ## Retrieval
 
 Use hybrid retrieval — do not rely on dense search alone. Nietzsche uses coined terms
 (*Ressentiment*, *Übermensch*, *Umwertung*) that keyword search captures better.
 
 ### Pipeline
-1. Run dense search → top 10 results from ChromaDB
+1. Call `get_vector_store().similarity_search()` → top 10 results
 2. Run BM25 search → top 10 results from in-memory index
 3. Merge with Reciprocal Rank Fusion (RRF): `score = 1 / (k + rank)` where k=60
 4. Re-rank merged top 10 with cross-encoder → return top 3–5
@@ -128,8 +270,17 @@ SPARSE_TOP_K = 10
 RERANK_TOP_N = 5
 RRF_K = 60
 EMBEDDING_MODEL = "sentence-transformers/all-mpnet-base-v2"
-RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+RERANKER_MODEL  = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+# Backend selection
+VECTOR_STORE_BACKEND = os.getenv("VECTOR_STORE_BACKEND", "chroma")
+
+# ChromaDB (local)
 CHROMA_PERSIST_DIR = "./data/chroma"
+
+# Supabase (production)
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")  # use service key, not anon key
 ```
 
 ---
@@ -171,15 +322,19 @@ Use `claude-sonnet-4-5` via the Anthropic Python SDK. Max tokens: 1024.
 # requirements.txt
 anthropic
 chromadb
+supabase
 sentence-transformers
 rank_bm25
 torch                        # required by sentence-transformers
+fastapi
+uvicorn[standard]
 typer
 rich
 requests                     # for Gutenberg fetching
 python-dotenv
 pytest
 pytest-mock
+httpx                        # required by FastAPI TestClient
 ```
 
 Install with:
@@ -194,9 +349,21 @@ pip install -r requirements.txt
 ```bash
 # .env
 ANTHROPIC_API_KEY=your_key_here
+
+# Vector store backend: "chroma" (default, local) or "supabase" (production)
+VECTOR_STORE_BACKEND=chroma
+
+# Required only when VECTOR_STORE_BACKEND=supabase
+SUPABASE_URL=https://yourproject.supabase.co
+SUPABASE_SERVICE_KEY=your_service_key_here
+
+# API
+INGEST_TOKEN=a_long_random_secret_string    # protects the /ingest endpoint
+ALLOWED_ORIGINS=http://localhost:3000       # comma-separated; set to Vercel URL in prod
 ```
 
-Load with `python-dotenv` in `config.py`. Never hardcode the key.
+Commit a `.env.example` with placeholder values. Never commit `.env` itself.
+Load with `python-dotenv` in `config.py`. Never hardcode any value.
 
 ---
 
@@ -224,14 +391,35 @@ python app.py query "How does Nietzsche view Socrates?" --work twilight_of_the_i
 
 Build in this sequence — each step is independently testable:
 
-1. `ingest/fetch.py` — download and save raw texts
-2. `ingest/chunk.py` — chunking logic (test on one work first)
-3. `ingest/embed.py` — embed chunks, persist to ChromaDB
-4. `retrieval/dense.py` — basic vector search working end-to-end
-5. `retrieval/sparse.py` — BM25 index over same chunks
-6. `retrieval/hybrid.py` — RRF merge + reranker
-7. `generation/claude.py` — prompt builder + Claude call
-8. `app.py` — wire everything into CLI
+**Core pipeline (completed):**
+1. `ingest/fetch.py` — download and save raw texts ✓
+2. `ingest/chunk.py` — chunking logic ✓
+3. `retrieval/store.py` — abstract interface + factory function ✓
+4. `retrieval/chroma_store.py` — ChromaDB implementation ✓
+5. `retrieval/supabase_store.py` — Supabase implementation ✓
+6. `ingest/embed.py` — embed chunks, write via `get_vector_store()` ✓
+7. `retrieval/sparse.py` — BM25 index ✓
+8. `retrieval/hybrid.py` — RRF merge + reranker ✓
+9. `generation/claude.py` — prompt builder + Claude call ✓
+10. `app.py` — CLI ✓
+
+**Next — API backend:**
+11. `api/models.py` — Pydantic schemas for request/response
+12. `api/dependencies.py` — shared dependencies (ingest auth header)
+13. `api/routes/query.py` — `POST /query` route
+14. `api/routes/ingest.py` — `POST /ingest` route (protected)
+15. `api/main.py` — mount routers, CORS, lifespan
+16. `tests/test_api.py` — FastAPI TestClient tests
+17. Deploy to Fly.io (see Deployment section)
+
+**Then — Frontend:**
+18. Scaffold Next.js app in `frontend/`
+19. `components/SourceCard.tsx` — cited passage display
+20. `components/FilterBar.tsx` — period + work filter dropdowns
+21. `components/MessageList.tsx` + `ChatInput.tsx` — chat UI
+22. `app/page.tsx` — wire everything together
+23. `app/api/query/route.ts` — proxy route to FastAPI backend
+24. Deploy to Vercel (see Deployment section)
 
 Do not move to step N+1 until step N has a passing smoke test.
 
@@ -247,6 +435,187 @@ Do not move to step N+1 until step N has a passing smoke test.
 
 ---
 
+## API Backend (FastAPI)
+
+The FastAPI layer wraps the existing pipeline and exposes it over HTTP. It must not
+contain any retrieval or generation logic itself — it only calls into the existing modules.
+
+### Endpoints
+
+#### `POST /query`
+```
+Request:
+{
+  "question": str,
+  "filter_period": "early" | "middle" | "late" | null,
+  "filter_slug": str | null
+}
+
+Response:
+{
+  "answer": str,
+  "sources": [
+    {
+      "work_title": str,
+      "work_slug": str,
+      "section_number": int | null,
+      "chunk_type": str,
+      "content": str,
+      "similarity": float
+    }
+  ]
+}
+```
+
+#### `POST /ingest`
+Protected by a static `X-Ingest-Token` header (set via env var `INGEST_TOKEN`).
+Triggers a full corpus ingest run. Returns `{"status": "ok", "chunks_written": int}`.
+This endpoint exists so ingestion can be triggered remotely without SSH access.
+
+### Pydantic models (`api/models.py`)
+Define `QueryRequest`, `SourceResult`, and `QueryResponse` — all fields typed and documented.
+Never use raw dicts in route handlers.
+
+### CORS
+Allow all origins in development. In production, restrict to your Vercel frontend domain via
+`ALLOWED_ORIGINS` env var:
+```python
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+```
+
+### Lifespan
+Load the embedding model and BM25 index once at startup using FastAPI's `lifespan` context
+manager — do not reload them per request. Store on `app.state`.
+
+### Running locally
+```bash
+uvicorn api.main:app --reload --port 8000
+```
+
+### New dependencies to add to `requirements.txt`
+```
+fastapi
+uvicorn[standard]
+```
+
+---
+
+## Frontend (Next.js)
+
+A focused, well-designed chat interface. The goal is something that looks portfolio-quality,
+not a generic chatbot. Lean into the Nietzsche theme in the design — dark, typographic, serious.
+
+### Stack
+- Next.js 14+ with App Router
+- TypeScript throughout — no `any` types
+- Tailwind CSS for styling
+- No UI component library — write components from scratch for portfolio value
+
+### Key components
+
+#### `SourceCard.tsx`
+Displays a retrieved passage with its citation. This is the most important UI component —
+it's what makes this app different from a generic chatbot:
+```
+┌─────────────────────────────────┐
+│ Beyond Good and Evil  §36       │
+│ Late period · Aphorism          │
+├─────────────────────────────────┤
+│ "Supposing truth is a woman..." │
+│                                 │
+│ Similarity: 0.87                │
+└─────────────────────────────────┘
+```
+
+#### `FilterBar.tsx`
+Two dropdowns: period (`early` / `middle` / `late` / `all`) and work (slug list from
+`WORKS` config, or `all`). Filters are sent with every query.
+
+#### `MessageList.tsx`
+Renders the conversation. Each assistant message has an expandable "Sources" section
+below it showing `SourceCard` components.
+
+#### `ChatInput.tsx`
+Simple textarea + submit button. Support `Shift+Enter` for newlines, `Enter` to submit.
+
+### API proxy route (`app/api/query/route.ts`)
+Proxy requests from the frontend to the FastAPI backend. This hides the backend URL
+from the browser and lets you set the `FASTAPI_URL` as a server-side env var:
+```typescript
+const res = await fetch(`${process.env.FASTAPI_URL}/query`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body),
+});
+```
+
+### Environment variables (frontend)
+```
+FASTAPI_URL=https://your-fly-app.fly.dev   # server-side only, no NEXT_PUBLIC_ prefix
+```
+
+---
+
+## Deployment
+
+### Backend — Fly.io
+
+Fly.io free tier supports one always-on VM. The embedding model (~420MB) needs to be
+bundled into the Docker image.
+
+**`Dockerfile` (in project root):**
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Pre-download the embedding model into the image at build time
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-mpnet-base-v2')"
+
+COPY . .
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8080"]
+```
+
+**`fly.toml` (generated by `fly launch`, then edit):**
+```toml
+[http_service]
+  internal_port = 8080
+  force_https = true
+
+[[vm]]
+  memory = "1gb"     # needed for the embedding model
+  cpu_kind = "shared"
+  cpus = 1
+```
+
+**Deploy commands:**
+```bash
+fly launch          # first time — generates fly.toml
+fly secrets set ANTHROPIC_API_KEY=... SUPABASE_URL=... SUPABASE_SERVICE_KEY=... INGEST_TOKEN=... ALLOWED_ORIGINS=https://your-vercel-app.vercel.app
+fly deploy          # subsequent deploys
+```
+
+**Trigger ingestion after deploy:**
+```bash
+curl -X POST https://your-fly-app.fly.dev/ingest \
+  -H "X-Ingest-Token: your_token_here"
+```
+
+### Frontend — Vercel
+
+```bash
+cd frontend
+vercel                    # first deploy, follow prompts
+vercel env add FASTAPI_URL   # set to your Fly.io URL
+vercel --prod             # subsequent deploys
+```
+
+Vercel auto-deploys on every push to `main` once connected to GitHub.
+
+---
+
 ## Testing
 
 ### Philosophy
@@ -255,7 +624,9 @@ Every module gets a test file written **at the same time** as the implementation
 When Claude Code writes `ingest/chunk.py`, it must also write `tests/test_chunk.py` in the same step.
 Tests are not optional polish; they are how we verify the pipeline before wiring modules together.
 
-Do not use the live ChromaDB, live embedding model, or the Claude API in unit tests.
+Do not use the live embedding model or the Claude API in unit tests.
+Do not instantiate `ChromaStore` or `SupabaseStore` directly in unit tests — mock
+`get_vector_store()` to return a `MagicMock`. This keeps all unit tests backend-agnostic.
 Use fixtures and mocks for anything with I/O or external dependencies.
 
 ---
@@ -265,18 +636,27 @@ Use fixtures and mocks for anything with I/O or external dependencies.
 ```
 nietzsche-rag/
 ├── tests/
-│   ├── conftest.py           # Shared fixtures (sample chunks, mock embeddings, etc.)
-│   ├── test_chunk.py         # Chunking logic
-│   ├── test_fetch.py         # Fetching / text cleaning
-│   ├── test_dense.py         # Vector search (mocked ChromaDB)
-│   ├── test_sparse.py        # BM25 search
-│   ├── test_hybrid.py        # RRF merge + reranking logic
-│   └── test_generation.py    # Prompt building (no live Claude calls)
+│   ├── conftest.py               # Shared fixtures
+│   ├── test_chunk.py             # Chunking logic
+│   ├── test_fetch.py             # Fetching / text cleaning
+│   ├── test_store.py             # Abstract interface + factory (mocked backends)
+│   ├── test_sparse.py            # BM25 search
+│   ├── test_hybrid.py            # RRF merge + reranking logic
+│   ├── test_generation.py        # Prompt building (no live Claude calls)
+│   ├── test_api.py               # FastAPI routes (TestClient, mocked pipeline)
+│   └── integration/
+│       ├── test_chroma_store.py  # Integration: real ChromaDB (runs locally)
+│       └── test_supabase_store.py # Integration: real Supabase (skipped without creds)
 ```
 
-Add `pytest` and `pytest-mock` to `requirements.txt`.
+Add `pytest` and `pytest-mock` to `requirements.txt` (already included above).
 
-Run all tests with:
+Run unit tests only:
+```bash
+pytest tests/ -v --ignore=tests/integration
+```
+
+Run all including integration:
 ```bash
 pytest tests/ -v
 ```
@@ -284,6 +664,75 @@ pytest tests/ -v
 ---
 
 ### What to Test Per Module
+
+#### `tests/test_api.py`
+Use FastAPI's `TestClient`. Mock the entire pipeline at the `hybrid.py` level so no
+embedding model or vector store is touched:
+
+```python
+from fastapi.testclient import TestClient
+from api.main import app
+
+client = TestClient(app)
+
+def test_query_returns_200(mocker):
+    mocker.patch("api.routes.query.run_pipeline", return_value={
+        "answer": "Nietzsche argues...",
+        "sources": [sample_chunk]
+    })
+    res = client.post("/query", json={"question": "What is the will to power?"})
+    assert res.status_code == 200
+    assert "answer" in res.json()
+
+def test_query_missing_question_returns_422():
+    res = client.post("/query", json={})
+    assert res.status_code == 422
+
+def test_ingest_requires_token():
+    res = client.post("/ingest")
+    assert res.status_code == 401
+
+def test_ingest_accepts_valid_token(mocker):
+    mocker.patch("api.routes.ingest.run_ingest", return_value=42)
+    res = client.post("/ingest", headers={"X-Ingest-Token": "test-token"})
+    assert res.status_code == 200
+    assert res.json()["chunks_written"] == 42
+```
+
+#### `tests/test_store.py`
+```python
+def test_factory_returns_chroma_by_default(mocker):
+    mocker.patch.dict(os.environ, {"VECTOR_STORE_BACKEND": "chroma"})
+    store = get_vector_store()
+    assert isinstance(store, ChromaStore)
+
+def test_factory_returns_supabase_when_configured(mocker):
+    mocker.patch.dict(os.environ, {"VECTOR_STORE_BACKEND": "supabase"})
+    store = get_vector_store()
+    assert isinstance(store, SupabaseStore)
+
+def test_store_interface_enforced():
+    # VectorStore cannot be instantiated directly (abstract)
+    with pytest.raises(TypeError):
+        VectorStore()
+```
+
+#### `tests/integration/test_supabase_store.py`
+```python
+import pytest, os
+
+pytestmark = pytest.mark.skipif(
+    not os.getenv("SUPABASE_URL"),
+    reason="Supabase credentials not configured"
+)
+
+def test_store_and_retrieve_chunk():
+    store = SupabaseStore()
+    store.delete_all()
+    store.store_chunks([sample_chunk], [mock_embedding])
+    results = store.similarity_search(mock_embedding, top_k=1)
+    assert results[0]["work_slug"] == "beyond_good_and_evil"
+```
 
 #### `tests/test_chunk.py`
 This is the most important test file. Cover:
@@ -407,26 +856,33 @@ def mock_embeddings():
 
 ### Mocking External Dependencies
 
-Never hit the real embedding model, ChromaDB, or Claude API in unit tests.
+Never hit the real embedding model or Claude API in unit tests.
+Never instantiate a real vector store — mock `get_vector_store()` instead.
+
+**Mocking the vector store (backend-agnostic):**
+```python
+def test_embed_stores_chunks(mocker):
+    mock_store = mocker.MagicMock()
+    mocker.patch("ingest.embed.get_vector_store", return_value=mock_store)
+    embed_chunks([sample_chunk])
+    mock_store.store_chunks.assert_called_once()
+
+def test_dense_search_calls_store(mocker):
+    mock_store = mocker.MagicMock()
+    mock_store.similarity_search.return_value = [sample_chunk]
+    mocker.patch("retrieval.hybrid.get_vector_store", return_value=mock_store)
+    results = dense_search(query_embedding=[0.1] * 768)
+    assert len(results) == 1
+```
 
 **Mocking the embedding model:**
 ```python
 def test_embed_calls_model(mocker):
-    mock_encode = mocker.patch(
+    mocker.patch(
         "ingest.embed.SentenceTransformer.encode",
         return_value=[[0.1] * 768]
     )
     embed_chunks([sample_chunk])
-    mock_encode.assert_called_once()
-```
-
-**Mocking ChromaDB:**
-```python
-def test_chunks_added_to_collection(mocker):
-    mock_collection = mocker.MagicMock()
-    mocker.patch("ingest.embed.get_chroma_collection", return_value=mock_collection)
-    embed_chunks([sample_chunk])
-    mock_collection.add.assert_called_once()
 ```
 
 **Mocking the Claude API:**

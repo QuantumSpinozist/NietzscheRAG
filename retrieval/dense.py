@@ -48,6 +48,7 @@ def dense_search(
     query: str,
     *,
     model_name: str = config.EMBEDDING_MODEL,
+    model: SentenceTransformer | None = None,
     top_k: int = config.DENSE_TOP_K,
     filter_period: str | None = None,
     filter_slug: str | None = None,
@@ -57,6 +58,8 @@ def dense_search(
     Args:
         query: The user's natural-language question.
         model_name: SentenceTransformer model used to embed the query.
+        model: Optional pre-loaded :class:`SentenceTransformer` instance.  If
+            provided, *model_name* is ignored and no model is loaded from disk.
         top_k: Number of results to return.
         filter_period: Optional period filter (e.g. ``"late"``).
         filter_slug: Optional work slug filter (e.g. ``"beyond_good_and_evil"``).
@@ -65,7 +68,8 @@ def dense_search(
         List of :class:`DenseResult` objects sorted by ascending distance
         (closest first).
     """
-    model = SentenceTransformer(model_name)
+    if model is None:
+        model = SentenceTransformer(model_name)
 
     query_embedding: list[float] = model.encode(
         [query], show_progress_bar=False, convert_to_numpy=True

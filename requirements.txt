@@ -4,9 +4,12 @@ supabase
 sentence-transformers
 rank_bm25
 torch                        # required by sentence-transformers
+fastapi
+uvicorn[standard]
 typer
 rich
 requests                     # for Gutenberg fetching
 python-dotenv
 pytest
 pytest-mock
+httpx                        # required by FastAPI TestClient

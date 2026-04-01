@@ -28,6 +28,11 @@ VECTOR_STORE_BACKEND: str = os.getenv("VECTOR_STORE_BACKEND", "chroma")
 SUPABASE_URL: str | None = os.getenv("SUPABASE_URL")
 SUPABASE_KEY: str | None = os.getenv("SUPABASE_SERVICE_KEY")
 
+# ── API ───────────────────────────────────────────────────────────────────────
+
+INGEST_TOKEN: str = os.getenv("INGEST_TOKEN", "")
+ALLOWED_ORIGINS: list[str] = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+
 # ── Retrieval hyperparameters ─────────────────────────────────────────────────
 
 DENSE_TOP_K: int = 10

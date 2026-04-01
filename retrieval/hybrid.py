@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from sentence_transformers import CrossEncoder
+from sentence_transformers import CrossEncoder, SentenceTransformer
 
 import config
 from retrieval.dense import DenseResult, dense_search
@@ -88,6 +88,7 @@ def rerank(
     results: list[HybridResult],
     top_n: int = config.RERANK_TOP_N,
     model_name: str = config.RERANKER_MODEL,
+    model: CrossEncoder | None = None,
 ) -> list[HybridResult]:
     """Rerank *results* with a cross-encoder and return the top *top_n*.
 
@@ -100,6 +101,8 @@ def rerank(
         results: Candidate list from :func:`reciprocal_rank_fusion`.
         top_n: Number of results to return after reranking.
         model_name: HuggingFace cross-encoder model identifier.
+        model: Optional pre-loaded :class:`CrossEncoder` instance.  If
+            provided, *model_name* is ignored.
 
     Returns:
         Top *top_n* :class:`HybridResult` objects sorted by descending
@@ -108,7 +111,8 @@ def rerank(
     if not results:
         return []
 
-    model = CrossEncoder(model_name)
+    if model is None:
+        model = CrossEncoder(model_name)
     pairs = [(query, r.document) for r in results]
     scores: list[float] = model.predict(pairs).tolist()
 
@@ -134,6 +138,8 @@ def hybrid_search(
     filter_period: str | None = None,
     filter_slug: str | None = None,
     bm25_index: BM25Index | None = None,
+    sentence_transformer: SentenceTransformer | None = None,
+    cross_encoder: CrossEncoder | None = None,
 ) -> list[HybridResult]:
     """Run full hybrid retrieval pipeline for *query*.
 
@@ -155,6 +161,8 @@ def hybrid_search(
         filter_slug: Optional work slug filter for dense search.
         bm25_index: Pre-built :class:`BM25Index`.  If *None*, all documents
             are fetched from the vector store and a fresh index is built.
+        sentence_transformer: Optional pre-loaded :class:`SentenceTransformer`.
+        cross_encoder: Optional pre-loaded :class:`CrossEncoder`.
 
     Returns:
         Top *top_n* :class:`HybridResult` objects sorted by rerank score.
@@ -163,6 +171,7 @@ def hybrid_search(
     dense_results = dense_search(
         query,
         model_name=embedding_model,
+        model=sentence_transformer,
         top_k=dense_top_k,
         filter_period=filter_period,
         filter_slug=filter_slug,
@@ -184,4 +193,4 @@ def hybrid_search(
     merged = reciprocal_rank_fusion(dense_results, sparse_results, k=rrf_k)
 
     # ── 4. Rerank ─────────────────────────────────────────────────────────────
-    return rerank(query, merged, top_n=top_n, model_name=reranker_model)
+    return rerank(query, merged, top_n=top_n, model_name=reranker_model, model=cross_encoder)
