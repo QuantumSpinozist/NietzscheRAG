@@ -59,8 +59,13 @@ def _reciprocal_rank(hit_ranks: list[int]) -> float:
 # ── main ──────────────────────────────────────────────────────────────────────
 
 
-def run(use_synonyms: bool = False) -> None:
-    label = "WITH synonym expansion" if use_synonyms else "baseline (no synonyms)"
+def run(use_synonyms: bool = False, use_hyde: bool = False) -> None:
+    parts = []
+    if use_synonyms:
+        parts.append("synonym expansion")
+    if use_hyde:
+        parts.append("HyDE")
+    label = " + ".join(parts) if parts else "baseline"
     console.print(f"\n[bold cyan]Retrieval eval — {label}[/bold cyan]\n")
 
     # Load corpus once for BM25
@@ -110,6 +115,7 @@ def run(use_synonyms: bool = False) -> None:
             bm25_index=bm25,
             sentence_transformer=st,
             cross_encoder=ce,
+            use_hyde=use_hyde,
         )
         elapsed = time.time() - t_q
 
@@ -190,8 +196,9 @@ def run(use_synonyms: bool = False) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--synonyms", action="store_true", help="Enable BM25 synonym expansion")
+    parser.add_argument("--hyde", action="store_true", help="Enable HyDE query expansion")
     args = parser.parse_args()
 
     import os
     os.environ.setdefault("VECTOR_STORE_BACKEND", "supabase")
-    run(use_synonyms=args.synonyms)
+    run(use_synonyms=args.synonyms, use_hyde=args.hyde)

@@ -17,6 +17,7 @@ def run_pipeline(
     filter_period: str | None,
     filter_slug: str | None,
     state: object,
+    use_hyde: bool = False,
 ) -> dict:
     """Execute hybrid retrieval + generation and return a serialisable result dict.
 
@@ -29,6 +30,8 @@ def run_pipeline(
         filter_slug: Optional work slug filter.
         state: FastAPI ``app.state`` carrying ``sentence_transformer``,
             ``cross_encoder``, and ``bm25_index``.
+        use_hyde: If *True*, generate a hypothetical Nietzsche passage before
+            dense retrieval (HyDE query expansion).
 
     Returns:
         Dict with ``"answer"`` (str) and ``"sources"`` (list of dicts).
@@ -40,6 +43,7 @@ def run_pipeline(
         bm25_index=getattr(state, "bm25_index", None),
         sentence_transformer=getattr(state, "sentence_transformer", None),
         cross_encoder=getattr(state, "cross_encoder", None),
+        use_hyde=use_hyde,
     )
 
     answer = generate_answer(question, results)
@@ -71,5 +75,6 @@ async def query_endpoint(body: QueryRequest, request: Request) -> QueryResponse:
         body.filter_period,
         body.filter_slug,
         request.app.state,
+        use_hyde=body.use_hyde,
     )
     return QueryResponse(**result)

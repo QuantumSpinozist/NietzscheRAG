@@ -17,6 +17,14 @@ class QueryRequest(BaseModel):
     filter_slug: str | None = Field(
         None, description="Restrict retrieval to a single work slug."
     )
+    use_hyde: bool = Field(
+        False,
+        description=(
+            "If true, generate a hypothetical Nietzsche passage via Claude before "
+            "dense retrieval (HyDE). Improves recall for abstract philosophical queries "
+            "at the cost of one additional fast LLM call."
+        ),
+    )
 
 
 class SourceResult(BaseModel):

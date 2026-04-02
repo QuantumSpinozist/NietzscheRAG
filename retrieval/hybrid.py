@@ -140,14 +140,18 @@ def hybrid_search(
     bm25_index: BM25Index | None = None,
     sentence_transformer: SentenceTransformer | None = None,
     cross_encoder: CrossEncoder | None = None,
+    use_hyde: bool = False,
+    hyde_model: str = config.HYDE_MODEL,
 ) -> list[HybridResult]:
     """Run full hybrid retrieval pipeline for *query*.
 
     Pipeline:
-    1. Dense search via the configured vector store (``dense_top_k`` results).
-    2. BM25 sparse search over all corpus documents (``sparse_top_k`` results).
-    3. RRF merge of both lists.
-    4. Cross-encoder reranking → top ``top_n`` results.
+    1. (Optional) HyDE: generate a hypothetical Nietzsche passage and use its
+       embedding instead of the raw question embedding for dense search.
+    2. Dense search via the configured vector store (``dense_top_k`` results).
+    3. BM25 sparse search over all corpus documents (``sparse_top_k`` results).
+    4. RRF merge of both lists.
+    5. Cross-encoder reranking → top ``top_n`` results.
 
     Args:
         query: Natural-language question.
@@ -163,13 +167,24 @@ def hybrid_search(
             are fetched from the vector store and a fresh index is built.
         sentence_transformer: Optional pre-loaded :class:`SentenceTransformer`.
         cross_encoder: Optional pre-loaded :class:`CrossEncoder`.
+        use_hyde: If *True*, generate a hypothetical Nietzsche passage via
+            Claude and embed it for dense search instead of the raw question.
+            BM25 and the reranker still use the original *query*.
+        hyde_model: Claude model used for HyDE generation (default: haiku).
 
     Returns:
         Top *top_n* :class:`HybridResult` objects sorted by rerank score.
     """
+    # ── 0. HyDE (optional) ────────────────────────────────────────────────────
+    embed_text: str | None = None
+    if use_hyde:
+        from retrieval.hyde import generate_hypothetical_passage
+        embed_text = generate_hypothetical_passage(query, model=hyde_model)
+
     # ── 1. Dense search ───────────────────────────────────────────────────────
     dense_results = dense_search(
         query,
+        embed_text=embed_text,
         model_name=embedding_model,
         model=sentence_transformer,
         top_k=dense_top_k,

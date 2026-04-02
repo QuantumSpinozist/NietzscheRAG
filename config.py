@@ -18,6 +18,7 @@ ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
 EMBEDDING_MODEL: str = "sentence-transformers/all-mpnet-base-v2"
 RERANKER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 GENERATION_MODEL: str = "claude-sonnet-4-5"
+HYDE_MODEL: str = "claude-haiku-4-5-20251001"  # cheap/fast model for hypothetical generation
 
 # ── Storage ───────────────────────────────────────────────────────────────────
 

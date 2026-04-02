@@ -47,6 +47,7 @@ class DenseResult:
 def dense_search(
     query: str,
     *,
+    embed_text: str | None = None,
     model_name: str = config.EMBEDDING_MODEL,
     model: SentenceTransformer | None = None,
     top_k: int = config.DENSE_TOP_K,
@@ -57,6 +58,10 @@ def dense_search(
 
     Args:
         query: The user's natural-language question.
+        embed_text: Text to embed instead of *query*.  Pass a HyDE-generated
+            hypothetical passage here to shift the embedding toward corpus
+            language while keeping *query* available for other pipeline steps.
+            When *None* (default), *query* itself is embedded.
         model_name: SentenceTransformer model used to embed the query.
         model: Optional pre-loaded :class:`SentenceTransformer` instance.  If
             provided, *model_name* is ignored and no model is loaded from disk.
@@ -71,8 +76,9 @@ def dense_search(
     if model is None:
         model = SentenceTransformer(model_name)
 
+    text_to_embed = embed_text if embed_text is not None else query
     query_embedding: list[float] = model.encode(
-        [query], show_progress_bar=False, convert_to_numpy=True
+        [text_to_embed], show_progress_bar=False, convert_to_numpy=True
     ).tolist()[0]
 
     store = get_vector_store()
