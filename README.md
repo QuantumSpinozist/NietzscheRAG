@@ -23,15 +23,18 @@ Query
   ├─ [Optional] HyDE: generate hypothetical Nietzsche passage via Claude Haiku,
   │   embed that instead of the raw question for better semantic alignment
   │
-  ├─ Dense retrieval (all-mpnet-base-v2 embeddings → Supabase pgvector)
-  ├─ Sparse retrieval (BM25 via rank_bm25, in-memory)
+  ├─ [Optional] Multi-query: generate 2 paraphrase variants via Claude Haiku,
+  │   run dense search for each and union all candidate lists
+  │
+  ├─ Dense retrieval ×(1+variants) → top 20 each (all-mpnet-base-v2 → Supabase pgvector)
+  ├─ Sparse retrieval (BM25 via rank_bm25, in-memory) → top 20
   │
   ▼
 RRF merge (Reciprocal Rank Fusion, k=60)
   │
   ▼
-Cross-encoder reranking (ms-marco-MiniLM-L-6-v2) → top 5
-  + aphorism bonus: specific aphorisms get a score boost over broad prose
+Cross-encoder reranking (ms-marco-MiniLM-L-6-v2) → top 7
+  + aphorism bonus (+1.5): specific aphorisms ranked above broad prose when scores are close
   │
   ▼
 Claude (claude-sonnet-4-5) with citation-enforcing system prompt
@@ -68,8 +71,10 @@ nietzsche-rag/
 │   ├── store.py              # Abstract VectorStore interface + factory
 │   ├── chroma_store.py       # ChromaDB implementation (local dev)
 │   ├── supabase_store.py     # Supabase + pgvector implementation (production)
+│   ├── dense.py              # Dense search with optional embed_text override
 │   ├── sparse.py             # BM25 keyword search
 │   ├── hyde.py               # HyDE: hypothetical passage generation via Claude
+│   ├── multiquery.py         # Multi-query: paraphrase variants via Claude
 │   └── hybrid.py             # RRF merge + cross-encoder reranking + aphorism bonus
 ├── generation/
 │   └── claude.py             # Prompt builder + Claude API call
@@ -266,16 +271,22 @@ python eval/run_eval.py --synonyms
 # With HyDE query expansion
 python eval/run_eval.py --hyde
 
+# With multi-query paraphrase expansion
+python eval/run_eval.py --multiquery
+
 # With aphorism reranker bonus
 python eval/run_eval.py --aphorism-bonus 1.5
 ```
 
-Current results (Supabase backend, `APHORISM_RERANK_BONUS=1.5`):
+Current results (Supabase backend, 15-question eval set):
 
 | Config | HR@5 | MRR@5 | HR@10 | MRR@10 |
 |--------|------|-------|-------|--------|
-| Baseline | 60% | 0.533 | 80% | 0.560 |
-| + aphorism bonus (1.5) | **70%** | **0.558** | **80%** | **0.573** |
+| Old baseline (k=10, bonus=0) | 60% | 0.533 | 80% | 0.560 |
+| + aphorism bonus (1.5), k=10 | 70% | 0.558 | 80% | 0.573 |
+| **Current (k=20, bonus=1.5)** | **80%** | **0.628** | **93.3%** | **0.637** |
+
+The 15-question eval covers: death of God, eternal recurrence, master/slave morality, will to power, amor fati, consciousness, revaluation of values, free will, origin of knowledge, nobility and pathos of distance, great suffering, perspectivism, and more. One persistent miss (BGE §211/212 "philosopher of the future") requires the target aphorism to enter the dense candidate pool — a known limitation of the current embedding model on that specific query.
 
 ---
 

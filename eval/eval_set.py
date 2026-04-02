@@ -90,4 +90,42 @@ EVAL_SET: list[EvalItem] = [
         ],
         note="AC §62 is the climax; §61 names the same project and is part of the same argument",
     ),
+    EvalItem(
+        question="What is Nietzsche's critique of free will and the concept of causa sui?",
+        ground_truth=[
+            ("beyond_good_and_evil", 21),   # primary: 'causa sui' as the best self-contradiction — canonical free will critique
+        ],
+        note="BGE §21 — the causa sui passage; Nietzsche dismantles both free and unfree will as metaphysical errors",
+    ),
+    EvalItem(
+        question="How did knowledge and logic emerge from false beliefs according to Nietzsche?",
+        ground_truth=[
+            ("the_gay_science", 110),   # primary: 'Origin of Knowledge' — false beliefs as incorporated errors underlying logic
+            ("the_gay_science", 111),   # secondary: 'Origin of the Logical' — directly continues the argument
+        ],
+        note="GS §110 'Origin of Knowledge'; GS §111 'Origin of the Logical' continues the same argument",
+    ),
+    EvalItem(
+        question="What does Nietzsche say about nobility and the pathos of distance?",
+        ground_truth=[
+            ("beyond_good_and_evil", 257),  # primary: 'What is noble?' — the founding act of aristocratic society
+            ("beyond_good_and_evil", 259),  # secondary: life as appropriation / will to power as the noble principle
+        ],
+        note="BGE §257 defines nobility via the pathos of distance; BGE §259 grounds it in will to power",
+    ),
+    EvalItem(
+        question="What does Nietzsche say about great suffering as a precondition of greatness?",
+        ground_truth=[
+            ("beyond_good_and_evil", 225),  # primary: 'The discipline of suffering, of great suffering'
+        ],
+        note="BGE §225 — the discipline of great suffering; Nietzsche's most direct statement on suffering and depth",
+    ),
+    EvalItem(
+        question="What does Nietzsche say about the value of untruth and false judgments as conditions of life?",
+        ground_truth=[
+            ("beyond_good_and_evil", 4),    # primary: 'the falseness of a judgment is not an objection to it'
+            ("beyond_good_and_evil", 34),   # secondary: perspectivism — every philosophy is a confession of its author
+        ],
+        note="BGE §4 is the epistemological provocation; BGE §34 extends it to perspectivism",
+    ),
 ]

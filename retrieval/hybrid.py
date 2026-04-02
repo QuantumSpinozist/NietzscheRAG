@@ -149,22 +149,27 @@ def hybrid_search(
     use_hyde: bool = False,
     hyde_model: str = config.HYDE_MODEL,
     aphorism_bonus: float = config.APHORISM_RERANK_BONUS,
+    use_multiquery: bool = False,
+    multiquery_n: int = config.MULTIQUERY_N,
+    multiquery_model: str = config.HYDE_MODEL,
 ) -> list[HybridResult]:
     """Run full hybrid retrieval pipeline for *query*.
 
     Pipeline:
     1. (Optional) HyDE: generate a hypothetical Nietzsche passage and use its
        embedding instead of the raw question embedding for dense search.
-    2. Dense search via the configured vector store (``dense_top_k`` results).
-    3. BM25 sparse search over all corpus documents (``sparse_top_k`` results).
-    4. RRF merge of both lists.
-    5. Cross-encoder reranking → top ``top_n`` results.
+    2. (Optional) Multi-query expansion: generate *multiquery_n* paraphrases
+       and run dense search for each; all dense result lists feed into RRF.
+    3. Dense search via the configured vector store (``dense_top_k`` results).
+    4. BM25 sparse search over all corpus documents (``sparse_top_k`` results).
+    5. RRF merge of all dense lists + sparse list.
+    6. Cross-encoder reranking → top ``top_n`` results.
 
     Args:
         query: Natural-language question.
         embedding_model: SentenceTransformer model for dense search.
         reranker_model: Cross-encoder model for reranking.
-        dense_top_k: Number of dense candidates.
+        dense_top_k: Number of dense candidates per query.
         sparse_top_k: Number of sparse candidates.
         rrf_k: RRF smoothing constant.
         top_n: Number of final results after reranking.
@@ -182,6 +187,12 @@ def hybrid_search(
             after cross-encoder scoring (default: ``config.APHORISM_RERANK_BONUS``).
             Helps specific aphorisms beat broad prose passages.  Set to 0.0
             to disable.
+        use_multiquery: If *True*, generate *multiquery_n* paraphrases of the
+            query and run dense search for each, unioning all result lists
+            before RRF.  Broadens the candidate pool for abstract queries.
+        multiquery_n: Number of query paraphrases to generate (default:
+            ``config.MULTIQUERY_N``).
+        multiquery_model: Claude model for paraphrase generation.
 
     Returns:
         Top *top_n* :class:`HybridResult` objects sorted by rerank score.
@@ -192,8 +203,10 @@ def hybrid_search(
         from retrieval.hyde import generate_hypothetical_passage
         embed_text = generate_hypothetical_passage(query, model=hyde_model)
 
-    # ── 1. Dense search ───────────────────────────────────────────────────────
-    dense_results = dense_search(
+    # ── 1. Dense search (original query + optional variants) ─────────────────
+    dense_results_lists: list[list[DenseResult]] = []
+
+    dense_results_lists.append(dense_search(
         query,
         embed_text=embed_text,
         model_name=embedding_model,
@@ -201,7 +214,20 @@ def hybrid_search(
         top_k=dense_top_k,
         filter_period=filter_period,
         filter_slug=filter_slug,
-    )
+    ))
+
+    if use_multiquery:
+        from retrieval.multiquery import generate_query_variants
+        variants = generate_query_variants(query, n=multiquery_n, model=multiquery_model)
+        for variant in variants:
+            dense_results_lists.append(dense_search(
+                variant,
+                model_name=embedding_model,
+                model=sentence_transformer,
+                top_k=dense_top_k,
+                filter_period=filter_period,
+                filter_slug=filter_slug,
+            ))
 
     # ── 2. Sparse search ─────────────────────────────────────────────────────
     if bm25_index is None:
@@ -215,8 +241,28 @@ def hybrid_search(
 
     sparse_results = bm25_index.search(query, top_k=sparse_top_k)
 
-    # ── 3. RRF merge ─────────────────────────────────────────────────────────
-    merged = reciprocal_rank_fusion(dense_results, sparse_results, k=rrf_k)
+    # ── 3. RRF merge (all dense lists + sparse) ───────────────────────────────
+    # Use the first dense list as the primary; merge in remaining lists
+    # and the sparse results via successive RRF passes.
+    merged = reciprocal_rank_fusion(dense_results_lists[0], sparse_results, k=rrf_k)
+    for extra_dense in dense_results_lists[1:]:
+        # Convert HybridResult list back to DenseResult-compatible list for RRF.
+        # We treat the current merged list as the "dense" side and the new
+        # variant results as additional dense candidates.
+        extra_as_hybrid = [
+            HybridResult(id=r.id, document=r.document, metadata=r.metadata, rrf_score=0.0)
+            for r in extra_dense
+        ]
+        # Re-run RRF treating merged as dense and extra as sparse
+        scores: dict[str, float] = {r.id: r.rrf_score for r in merged}
+        docs: dict[str, tuple[str, dict]] = {r.id: (r.document, r.metadata) for r in merged}
+        for rank, r in enumerate(extra_as_hybrid, start=1):
+            scores[r.id] = scores.get(r.id, 0.0) + 1.0 / (rrf_k + rank)
+            docs[r.id] = (r.document, r.metadata)
+        merged = [
+            HybridResult(id=doc_id, document=docs[doc_id][0], metadata=docs[doc_id][1], rrf_score=score)
+            for doc_id, score in sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        ]
 
     # ── 4. Rerank ─────────────────────────────────────────────────────────────
     return rerank(

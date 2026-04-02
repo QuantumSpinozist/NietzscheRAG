@@ -23,7 +23,10 @@ nietzsche-rag/
 │   ├── chroma_store.py       # ChromaDB implementation (local dev)
 │   ├── supabase_store.py     # Supabase + pgvector implementation (production)
 │   ├── sparse.py             # BM25 keyword search via rank_bm25
-│   └── hybrid.py             # RRF merge + reranker
+│   ├── dense.py              # Dense search with optional embed_text override (for HyDE)
+│   ├── hyde.py               # HyDE: generate hypothetical Nietzsche passage via Claude
+│   ├── multiquery.py         # Multi-query expansion: generate paraphrase variants via Claude
+│   └── hybrid.py             # RRF merge + cross-encoder reranking + aphorism bonus
 ├── generation/
 │   └── claude.py             # Build prompt and call Claude API
 ├── api/
@@ -258,17 +261,25 @@ Use hybrid retrieval — do not rely on dense search alone. Nietzsche uses coine
 (*Ressentiment*, *Übermensch*, *Umwertung*) that keyword search captures better.
 
 ### Pipeline
-1. Call `get_vector_store().similarity_search()` → top 10 results
-2. Run BM25 search → top 10 results from in-memory index
+0. (Optional) **HyDE**: generate a hypothetical Nietzsche-style passage via Claude Haiku,
+   embed that instead of the raw question for the dense search step.
+0. (Optional) **Multi-query expansion**: generate 2 paraphrase variants of the question
+   via Claude Haiku and run dense search for each; all lists feed into RRF.
+1. Call `get_vector_store().similarity_search()` → top 20 dense results
+2. Run BM25 search → top 20 results from in-memory index
 3. Merge with Reciprocal Rank Fusion (RRF): `score = 1 / (k + rank)` where k=60
-4. Re-rank merged top 10 with cross-encoder → return top 3–5
+4. Re-rank merged candidates with cross-encoder → return top 7
+   - After cross-encoder scoring, apply `APHORISM_RERANK_BONUS = 1.5` to chunks
+     with `chunk_type == "aphorism"` to prefer specific aphorisms over broad prose.
 
 ### Configurable parameters (in `config.py`)
 ```python
-DENSE_TOP_K = 10
-SPARSE_TOP_K = 10
-RERANK_TOP_N = 5
+DENSE_TOP_K = 20
+SPARSE_TOP_K = 20
+RERANK_TOP_N = 7
 RRF_K = 60
+APHORISM_RERANK_BONUS = 1.5   # additive bonus for aphorism chunks after cross-encoder scoring
+MULTIQUERY_N = 2               # number of paraphrase variants for multi-query expansion
 EMBEDDING_MODEL = "sentence-transformers/all-mpnet-base-v2"
 RERANKER_MODEL  = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
@@ -419,7 +430,16 @@ Build in this sequence — each step is independently testable:
 21. `components/MessageList.tsx` + `ChatInput.tsx` — chat UI ✓
 22. `app/page.tsx` — wire everything together ✓
 23. `app/api/query/route.ts` — proxy route to FastAPI backend ✓
-24. Deploy to Vercel (pending)
+24. Deploy to Vercel ✓ — live at https://nietzscherag.vercel.app
+
+**Retrieval improvements (completed):**
+25. `retrieval/hyde.py` — HyDE query expansion via Claude Haiku ✓
+26. `retrieval/multiquery.py` — multi-query paraphrase expansion ✓
+27. `retrieval/dense.py` — `embed_text` override parameter for HyDE ✓
+28. `hybrid_search()` — aphorism reranker bonus, HyDE, multi-query flags ✓
+29. `eval/eval_set.py` — expanded to 15 questions with two-GT items ✓
+30. `eval/run_eval.py` — HR@5, HR@10, MRR@5, MRR@10 metrics ✓
+31. Tuned hyperparameters: DENSE/SPARSE_TOP_K=20, RERANK_TOP_N=7, APHORISM_BONUS=1.5 ✓
 
 Do not move to step N+1 until step N has a passing smoke test.
 

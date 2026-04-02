@@ -59,12 +59,14 @@ def _reciprocal_rank(hit_ranks: list[int]) -> float:
 # ── main ──────────────────────────────────────────────────────────────────────
 
 
-def run(use_synonyms: bool = False, use_hyde: bool = False, aphorism_bonus: float = 0.0) -> None:
+def run(use_synonyms: bool = False, use_hyde: bool = False, aphorism_bonus: float = 0.0, use_multiquery: bool = False) -> None:
     parts = []
     if use_synonyms:
         parts.append("synonym expansion")
     if use_hyde:
         parts.append("HyDE")
+    if use_multiquery:
+        parts.append("multi-query")
     if aphorism_bonus:
         parts.append(f"aphorism bonus={aphorism_bonus}")
     label = " + ".join(parts) if parts else "baseline"
@@ -119,6 +121,7 @@ def run(use_synonyms: bool = False, use_hyde: bool = False, aphorism_bonus: floa
             cross_encoder=ce,
             use_hyde=use_hyde,
             aphorism_bonus=aphorism_bonus,
+            use_multiquery=use_multiquery,
         )
         elapsed = time.time() - t_q
 
@@ -200,6 +203,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--synonyms", action="store_true", help="Enable BM25 synonym expansion")
     parser.add_argument("--hyde", action="store_true", help="Enable HyDE query expansion")
+    parser.add_argument("--multiquery", action="store_true", help="Enable multi-query expansion (2 paraphrases)")
     parser.add_argument(
         "--aphorism-bonus",
         type=float,
@@ -211,4 +215,4 @@ if __name__ == "__main__":
 
     import os
     os.environ.setdefault("VECTOR_STORE_BACKEND", "supabase")
-    run(use_synonyms=args.synonyms, use_hyde=args.hyde, aphorism_bonus=args.aphorism_bonus)
+    run(use_synonyms=args.synonyms, use_hyde=args.hyde, aphorism_bonus=args.aphorism_bonus, use_multiquery=args.multiquery)
