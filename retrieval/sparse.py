@@ -11,18 +11,95 @@ from rank_bm25 import BM25Okapi
 import config
 
 
+# ── Synonym / term-expansion table ────────────────────────────────────────────
+#
+# Maps any token (after lowercasing) to a list of additional tokens that should
+# be injected alongside it.  This bridges the gap between the user's query
+# vocabulary and Nietzsche's actual prose / Gutenberg translation choices.
+#
+# Design rules:
+#   - Keys are tokens AS THEY APPEAR IN QUERIES (e.g. "overman").
+#   - Values are tokens AS THEY APPEAR IN THE CORPUS (e.g. "übermensch").
+#   - Expansion is symmetric: corpus tokens also map to query tokens so that
+#     indexing adds the query-side synonyms and searching adds corpus-side ones.
+#   - All strings are pre-lowercased.
+
+_SYNONYMS: dict[str, list[str]] = {
+    # Übermensch / overman / superman — Gutenberg translations vary
+    "overman":          ["übermensch", "ubermensch", "superman"],
+    "übermensch":       ["overman", "superman", "ubermensch"],
+    "ubermensch":       ["übermensch", "overman", "superman"],
+    "superman":         ["übermensch", "overman", "ubermensch"],
+
+    # Eternal recurrence / eternal return — GS §341 title is "The Heaviest Burden"
+    "recurrence":       ["return", "burden", "heaviest"],
+    "return":           ["recurrence"],
+    "eternal":          ["recurrence", "return", "heaviest"],
+
+    # Ressentiment — French/German term vs. English "resentment"
+    "resentment":       ["ressentiment"],
+    "ressentiment":     ["resentment", "rancour", "rancor"],
+
+    # Amor fati — Latin phrase vs. English paraphrase
+    "amor":             ["fate", "necessity", "necessary", "beautiful"],
+    "fati":             ["fate", "amor", "love"],
+    "fate":             ["amor", "fati", "necessity"],
+
+    # Revaluation / transvaluation — "Umwertung aller Werte"
+    "revaluation":      ["transvaluation", "umwertung", "inversion"],
+    "transvaluation":   ["revaluation", "umwertung"],
+
+    # Dionysian / Apollonian — capitalization stripped by tokeniser
+    "dionysian":        ["dionysus", "dionysos"],
+    "dionysus":         ["dionysian"],
+    "apollonian":       ["apollo", "apolline"],
+    "apollo":           ["apollonian", "apolline"],
+
+    # Will to power — common paraphrase vs. "Wille zur Macht"
+    "macht":            ["power", "will"],
+    "wille":            ["will", "power"],
+
+    # Nihilism variants
+    "nihilism":         ["nihilist", "nihilistic", "nothingness"],
+    "nihilist":         ["nihilism", "nihilistic"],
+
+    # Perspectivism
+    "perspectivism":    ["perspective", "perspectives", "perspectival"],
+    "perspectival":     ["perspectivism", "perspective"],
+
+    # Pathos of distance
+    "pathos":           ["distance", "noble", "rank"],
+
+    # Ascetic ideal
+    "ascetic":          ["asceticism", "priest", "ideal"],
+    "asceticism":       ["ascetic"],
+}
+
+
+def _expand(tokens: list[str]) -> list[str]:
+    """Append synonym tokens for any recognised token in *tokens*."""
+    extra: list[str] = []
+    for t in tokens:
+        for syn in _SYNONYMS.get(t, []):
+            if syn not in tokens:
+                extra.append(syn)
+    return tokens + extra
+
+
 # ── Tokenisation ──────────────────────────────────────────────────────────────
 
 _SPLIT_RE = re.compile(r"[^a-zA-Z0-9\u00C0-\u024F']+")
 
 
-def _tokenise(text: str) -> list[str]:
+def _tokenise(text: str, use_synonyms: bool = False) -> list[str]:
     """Lowercase, split on non-alphanumeric characters, drop empty tokens.
 
     Retains accented characters so Nietzsche's coined terms (e.g. *Ressentiment*,
-    *Übermensch*) survive tokenisation.
+    *Übermensch*) survive tokenisation.  When *use_synonyms* is True, recognised
+    terms are expanded with their synonym equivalents before returning.
     """
-    return [t for t in _SPLIT_RE.split(text.lower()) if t]
+    tokens = [t for t in _SPLIT_RE.split(text.lower()) if t]
+    return _expand(tokens) if use_synonyms else tokens
 
 
 # ── Result type ───────────────────────────────────────────────────────────────
@@ -60,6 +137,8 @@ class BM25Index:
         ids: Stable document identifiers (e.g. ``"bge_chunk_0"``).
         documents: Raw text for each document.
         metadatas: Metadata dicts for each document (must be ChromaDB-safe).
+        use_synonyms: When True, recognised Nietzsche-specific terms are
+            expanded with synonyms during both indexing and querying.
     """
 
     def __init__(
@@ -67,6 +146,7 @@ class BM25Index:
         ids: Sequence[str],
         documents: Sequence[str],
         metadatas: Sequence[dict],
+        use_synonyms: bool = False,
     ) -> None:
         if not (len(ids) == len(documents) == len(metadatas)):
             raise ValueError(
@@ -76,9 +156,10 @@ class BM25Index:
         self._ids = list(ids)
         self._documents = list(documents)
         self._metadatas = list(metadatas)
+        self._use_synonyms = use_synonyms
         # BM25Okapi raises ZeroDivisionError on empty corpus
         if self._ids:
-            tokenised = [_tokenise(doc) for doc in documents]
+            tokenised = [_tokenise(doc, use_synonyms=use_synonyms) for doc in documents]
             self._bm25: BM25Okapi | None = BM25Okapi(tokenised)
         else:
             self._bm25 = None
@@ -110,7 +191,7 @@ class BM25Index:
         if self._bm25 is None:
             return []
 
-        query_tokens = _tokenise(query)
+        query_tokens = _tokenise(query, use_synonyms=self._use_synonyms)
         if not query_tokens:
             return []
 

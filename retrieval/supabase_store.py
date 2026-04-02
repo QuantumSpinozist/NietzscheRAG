@@ -125,13 +125,26 @@ class SupabaseStore(VectorStore):
         ]
 
     def get_all_documents(self) -> dict:
-        """Return all stored documents as a dict with ids, documents, metadatas."""
-        result = (
-            self._client.table("chunks")
-            .select(_ALL_COLS)
-            .execute()
-        )
-        rows = result.data
+        """Return all stored documents as a dict with ids, documents, metadatas.
+
+        Paginates in batches of 1000 to work around the Supabase client's
+        default row-count limit.
+        """
+        rows: list[dict] = []
+        page_size = 1000
+        offset = 0
+        while True:
+            batch = (
+                self._client.table("chunks")
+                .select(_ALL_COLS)
+                .range(offset, offset + page_size - 1)
+                .execute()
+                .data
+            )
+            rows.extend(batch)
+            if len(batch) < page_size:
+                break
+            offset += page_size
         return {
             "ids": [r["chunk_id"] for r in rows],
             "documents": [r["content"] for r in rows],
