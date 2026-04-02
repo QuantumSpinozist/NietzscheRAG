@@ -20,6 +20,9 @@ A Retrieval-Augmented Generation system over the complete Nietzsche corpus. Ask 
 ```
 Query
   │
+  ├─ [Optional] HyDE: generate hypothetical Nietzsche passage via Claude Haiku,
+  │   embed that instead of the raw question for better semantic alignment
+  │
   ├─ Dense retrieval (all-mpnet-base-v2 embeddings → Supabase pgvector)
   ├─ Sparse retrieval (BM25 via rank_bm25, in-memory)
   │
@@ -28,6 +31,7 @@ RRF merge (Reciprocal Rank Fusion, k=60)
   │
   ▼
 Cross-encoder reranking (ms-marco-MiniLM-L-6-v2) → top 5
+  + aphorism bonus: specific aphorisms get a score boost over broad prose
   │
   ▼
 Claude (claude-sonnet-4-5) with citation-enforcing system prompt
@@ -65,7 +69,8 @@ nietzsche-rag/
 │   ├── chroma_store.py       # ChromaDB implementation (local dev)
 │   ├── supabase_store.py     # Supabase + pgvector implementation (production)
 │   ├── sparse.py             # BM25 keyword search
-│   └── hybrid.py             # RRF merge + cross-encoder reranking
+│   ├── hyde.py               # HyDE: hypothetical passage generation via Claude
+│   └── hybrid.py             # RRF merge + cross-encoder reranking + aphorism bonus
 ├── generation/
 │   └── claude.py             # Prompt builder + Claude API call
 ├── api/
@@ -182,9 +187,12 @@ python app.py ingest --all
 {
   "question": "What is the will to power?",
   "filter_period": "late",
-  "filter_slug": null
+  "filter_slug": null,
+  "use_hyde": false
 }
 ```
+
+`use_hyde: true` generates a hypothetical Nietzsche-style passage via Claude Haiku before dense retrieval — improves recall on abstract philosophical queries at the cost of one extra fast LLM call.
 
 Response:
 
@@ -244,6 +252,31 @@ pytest tests/ -v --ignore=tests/integration
 pytest tests/ -v
 ```
 
+### Retrieval eval
+
+A 10-question eval set with ground-truth passage annotations lives in `eval/`:
+
+```bash
+# Baseline hybrid retrieval
+python eval/run_eval.py
+
+# With BM25 synonym expansion
+python eval/run_eval.py --synonyms
+
+# With HyDE query expansion
+python eval/run_eval.py --hyde
+
+# With aphorism reranker bonus
+python eval/run_eval.py --aphorism-bonus 1.5
+```
+
+Current results (Supabase backend, `APHORISM_RERANK_BONUS=1.5`):
+
+| Config | HR@5 | MRR@5 | HR@10 | MRR@10 |
+|--------|------|-------|-------|--------|
+| Baseline | 60% | 0.533 | 80% | 0.560 |
+| + aphorism bonus (1.5) | **70%** | **0.558** | **80%** | **0.573** |
+
 ---
 
 ## Deployment
@@ -287,7 +320,8 @@ npx vercel --prod
 | Layer | Technology |
 |-------|-----------|
 | Embeddings | `sentence-transformers/all-mpnet-base-v2` (768-dim, local) |
-| Reranker | `cross-encoder/ms-marco-MiniLM-L-6-v2` |
+| Reranker | `cross-encoder/ms-marco-MiniLM-L-6-v2` + aphorism score bonus |
+| Query expansion | HyDE via Claude Haiku (optional, per-request) |
 | Generation | Claude (claude-sonnet-4-5) via Anthropic SDK |
 | Vector store (local) | ChromaDB |
 | Vector store (production) | Supabase + pgvector |
