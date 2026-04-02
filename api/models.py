@@ -36,6 +36,7 @@ class SourceResult(BaseModel):
     chunk_type: str
     content: str
     similarity: float
+    used: bool = Field(True, description="Whether Claude cited this passage in the answer.")
 
 
 class QueryResponse(BaseModel):

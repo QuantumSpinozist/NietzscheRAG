@@ -6,7 +6,7 @@ from fastapi import APIRouter, Request
 
 import config
 from api.models import QueryRequest, QueryResponse, SourceResult
-from generation.claude import generate_answer
+from generation.claude import generate_answer, parse_used_chunk_ids
 from retrieval.hybrid import hybrid_search
 
 router = APIRouter()
@@ -47,6 +47,7 @@ def run_pipeline(
     )
 
     answer = generate_answer(question, results)
+    used_ids = parse_used_chunk_ids(answer, results)
 
     sources = [
         {
@@ -56,6 +57,7 @@ def run_pipeline(
             "chunk_type": r.metadata.get("chunk_type", ""),
             "content": r.document,
             "similarity": r.rerank_score if r.rerank_score is not None else r.rrf_score,
+            "used": r.id in used_ids,
         }
         for r in results
     ]

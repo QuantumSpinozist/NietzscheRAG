@@ -38,7 +38,7 @@ ALLOWED_ORIGINS: list[str] = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 
 DENSE_TOP_K: int = 20
 SPARSE_TOP_K: int = 20
-RERANK_TOP_N: int = 7
+RERANK_TOP_N: int = 10
 RRF_K: int = 60
 # Additive bonus applied to aphorism chunks after cross-encoder scoring.
 # Cross-encoder logits are roughly in [-10, +10]; 0.5 is a meaningful nudge

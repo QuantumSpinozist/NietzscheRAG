@@ -5,6 +5,7 @@ export interface SourceResult {
   chunk_type: string;
   content: string;
   similarity: number;
+  used: boolean;
 }
 
 export interface QueryResponse {

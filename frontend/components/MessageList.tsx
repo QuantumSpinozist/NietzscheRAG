@@ -10,6 +10,18 @@ function AssistantMessage({ message }: { message: Message }) {
   const [showSources, setShowSources] = useState(false);
   const hasSources = message.sources && message.sources.length > 0;
 
+  const sortedSources = hasSources
+    ? [...message.sources!].sort((a, b) => Number(b.used) - Number(a.used))
+    : [];
+  const citedCount = sortedSources.filter((s) => s.used).length;
+  const totalCount = sortedSources.length;
+
+  const toggleLabel = showSources
+    ? "▲ hide sources"
+    : citedCount === totalCount
+    ? `▼ ${citedCount} cited`
+    : `▼ ${citedCount} cited · ${totalCount - citedCount} more`;
+
   return (
     <div className="space-y-3">
       <div className="prose-nietzsche">
@@ -24,15 +36,13 @@ function AssistantMessage({ message }: { message: Message }) {
             onClick={() => setShowSources((s) => !s)}
             className="text-xs text-[var(--muted)] hover:text-[var(--accent)] transition-colors font-mono-ui tracking-wide uppercase"
           >
-            {showSources
-              ? "▲ hide sources"
-              : `▼ ${message.sources!.length} source${message.sources!.length > 1 ? "s" : ""}`}
+            {toggleLabel}
           </button>
 
           {showSources && (
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              {message.sources!.map((src, i) => (
-                <SourceCard key={i} source={src} />
+              {sortedSources.map((src, i) => (
+                <SourceCard key={i} source={src} used={src.used} />
               ))}
             </div>
           )}

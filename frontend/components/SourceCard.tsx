@@ -5,6 +5,7 @@ import { SourceResult } from "@/types";
 
 interface SourceCardProps {
   source: SourceResult;
+  used?: boolean;
 }
 
 function SourceModal({ source, onClose }: { source: SourceResult; onClose: () => void }) {
@@ -72,7 +73,7 @@ function SourceModal({ source, onClose }: { source: SourceResult; onClose: () =>
   );
 }
 
-export default function SourceCard({ source }: SourceCardProps) {
+export default function SourceCard({ source, used = true }: SourceCardProps) {
   const [expanded, setExpanded] = useState(false);
   const section = source.section_number != null ? `§${source.section_number}` : null;
 
@@ -80,7 +81,11 @@ export default function SourceCard({ source }: SourceCardProps) {
     <>
       <button
         onClick={() => setExpanded(true)}
-        className="w-full text-left rounded border border-[var(--border)] bg-[var(--surface-2)] overflow-hidden text-sm hover:border-[var(--accent-dim)] transition-colors group"
+        className={`w-full text-left rounded border border-[var(--border)] bg-[var(--surface-2)] overflow-hidden text-sm transition-colors group ${
+          used
+            ? "hover:border-[var(--accent-dim)]"
+            : "opacity-40 hover:opacity-60"
+        }`}
       >
         {/* Header */}
         <div className="flex items-baseline justify-between px-4 py-2 border-b border-[var(--border)] bg-[var(--surface)]">
@@ -93,6 +98,9 @@ export default function SourceCard({ source }: SourceCardProps) {
             )}
           </div>
           <div className="flex items-center gap-2 shrink-0 ml-2">
+            {!used && (
+              <span className="text-xs text-[var(--muted)] font-mono-ui">not cited</span>
+            )}
             <span className="text-xs text-[var(--muted)] capitalize">{source.chunk_type}</span>
             <span className="text-xs text-[var(--muted)] opacity-0 group-hover:opacity-100 transition-opacity font-mono-ui">
               ⤢
