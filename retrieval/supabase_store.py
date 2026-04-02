@@ -154,3 +154,13 @@ class SupabaseStore(VectorStore):
     def delete_all(self) -> None:
         """Delete all rows from the chunks table."""
         self._client.table("chunks").delete().neq("id", 0).execute()
+
+    def delete_by_slug(self, work_slug: str) -> int:
+        """Delete all chunks for *work_slug* from Supabase."""
+        result = (
+            self._client.table("chunks")
+            .delete()
+            .eq("work_slug", work_slug)
+            .execute()
+        )
+        return len(result.data) if result.data else 0

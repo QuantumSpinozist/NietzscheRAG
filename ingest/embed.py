@@ -50,6 +50,32 @@ WORK_END_BEFORE: dict[str, str] = {
     "twilight_of_the_idols": "THE ANTICHRIST\n\nAn Attempted Criticism",
 }
 
+# Translator/editor introductions that precede Nietzsche's own text in the
+# Oscar Levy Gutenberg editions.  chunk_work() discards everything before the
+# first occurrence of this string so only primary-source content is indexed.
+#
+# Each marker is the first line of Nietzsche's own text (preface or chapter 1).
+WORK_START_AFTER: dict[str, str] = {
+    # Ecce Homo: skip Ludovici's 20-page translator intro; start at Nietzsche's
+    # own "Author's Preface" whose opening sentence is unique.
+    "ecce_homo": "On this perfect day",
+    # Birth of Tragedy: skip Elisabeth Förster-Nietzsche's biographical intro;
+    # start at Nietzsche's own 1886 self-critical preface.
+    "birth_of_tragedy": "AN ATTEMPT AT SELF-CRITICISM.\n\n\n\nI.",
+    # Genealogy of Morality: skip the short Editor's Note; start at Nietzsche's
+    # Preface §1.
+    "genealogy_of_morality": "PREFACE.\n\n\n1.",
+    # Twilight of the Idols: skip Ludovici's translator preface; start at
+    # Nietzsche's own cheerful preface.
+    "twilight_of_the_idols": "PREFACE\n\n\nTo maintain a cheerful attitude",
+    # Untimely Meditations I–II: skip editorial note, "Nietzsche in England"
+    # essay, and translator preface; start at §1 of "David Strauss".
+    "untimely_meditations_1": "Public opinion in Germany",
+    # Untimely Meditations III–IV: skip translator's introduction; start at
+    # the actual "Use and Abuse of History" essay (preface + §1).
+    "untimely_meditations_2": "THE USE AND ABUSE OF HISTORY.\n\n\n",
+}
+
 
 # ── Metadata serialisation ────────────────────────────────────────────────────
 
@@ -182,7 +208,12 @@ def main(argv: list[str] | None = None) -> None:
 
     text = raw_path.read_text(encoding="utf-8")
     end_before = WORK_END_BEFORE.get(slug)
-    chunks = chunk_work(text, title, slug, period, chunk_style, end_before=end_before)
+    start_after = WORK_START_AFTER.get(slug)
+    chunks = chunk_work(
+        text, title, slug, period, chunk_style,
+        end_before=end_before,
+        start_after=start_after,
+    )
     console.print(f"  chunks : {len(chunks)}")
 
     embed_chunks(

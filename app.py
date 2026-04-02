@@ -21,7 +21,7 @@ from rich.rule import Rule
 from rich.table import Table
 
 import config
-from ingest.embed import WORK_REGISTRY, WORK_END_BEFORE, embed_chunks
+from ingest.embed import WORK_REGISTRY, WORK_END_BEFORE, WORK_START_AFTER, embed_chunks
 from ingest.fetch import GUTENBERG_SOURCES, save_work
 
 app = typer.Typer(
@@ -105,7 +105,12 @@ def ingest(
         console.rule(f"[bold cyan]{title}[/bold cyan]")
         text = raw_path.read_text(encoding="utf-8")
         end_before = WORK_END_BEFORE.get(slug)
-        chunks = chunk_work(text, title, slug, period, chunk_style, end_before=end_before)
+        start_after = WORK_START_AFTER.get(slug)
+        chunks = chunk_work(
+            text, title, slug, period, chunk_style,
+            end_before=end_before,
+            start_after=start_after,
+        )
         console.print(f"  Chunked into [cyan]{len(chunks)}[/cyan] pieces")
 
         try:

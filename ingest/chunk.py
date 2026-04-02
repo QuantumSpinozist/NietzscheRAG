@@ -331,6 +331,7 @@ def chunk_work(
     target_prose_tokens: int = 300,
     overlap_tokens: int = 100,
     end_before: str | None = None,
+    start_after: str | None = None,
 ) -> list[Chunk]:
     """Strip Gutenberg boilerplate and chunk a Nietzsche work.
 
@@ -347,11 +348,24 @@ def chunk_work(
         end_before: If given, the stripped text is truncated at the first
             occurrence of this string.  Use this when a single Gutenberg file
             bundles multiple works (e.g. TI + The Antichrist in PG 52263).
+        start_after: If given, the stripped text is truncated to begin at the
+            first occurrence of this string, discarding everything before it.
+            Use this to skip translator/editor introductions that precede
+            Nietzsche's own text in the Gutenberg edition.
 
     Returns:
         List of :class:`Chunk` objects ready for embedding.
     """
     clean = strip_gutenberg_boilerplate(text)
+    if start_after:
+        idx = clean.find(start_after)
+        if idx != -1:
+            clean = clean[idx:]
+        else:
+            console.print(
+                f"[yellow]Warning:[/yellow] start_after marker not found in {work_slug!r}; "
+                "chunking full text."
+            )
     if end_before:
         idx = clean.find(end_before)
         if idx != -1:

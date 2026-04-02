@@ -100,3 +100,11 @@ class ChromaStore(VectorStore):
         """Delete the entire ChromaDB collection."""
         client = chromadb.PersistentClient(path=str(self._persist_dir))
         client.delete_collection(self._collection_name)
+
+    def delete_by_slug(self, work_slug: str) -> int:
+        """Delete all chunks for *work_slug* from ChromaDB."""
+        existing = self._collection.get(where={"work_slug": work_slug}, include=[])
+        ids = existing["ids"]
+        if ids:
+            self._collection.delete(ids=ids)
+        return len(ids)

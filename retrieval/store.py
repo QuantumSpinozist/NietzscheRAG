@@ -46,6 +46,14 @@ class VectorStore(ABC):
     def delete_all(self) -> None:
         """Delete every document from the store."""
 
+    @abstractmethod
+    def delete_by_slug(self, work_slug: str) -> int:
+        """Delete all chunks belonging to *work_slug*.
+
+        Returns:
+            Number of rows deleted.
+        """
+
 
 def get_vector_store() -> VectorStore:
     """Read ``VECTOR_STORE_BACKEND`` from the environment and return the matching implementation.
