@@ -177,12 +177,18 @@ class BM25Index:
         self,
         query: str,
         top_k: int = config.SPARSE_TOP_K,
+        filter_period: str | None = None,
+        filter_slug: str | None = None,
     ) -> list[SparseResult]:
         """Return the *top_k* highest-scoring documents for *query*.
 
         Args:
             query: Natural-language question or keyword string.
             top_k: Maximum number of results to return.
+            filter_period: If set, only return chunks whose ``work_period``
+                metadata matches (e.g. ``"late"``).
+            filter_slug: If set, only return chunks whose ``work_slug``
+                metadata matches (e.g. ``"beyond_good_and_evil"``).
 
         Returns:
             List of :class:`SparseResult` sorted by descending BM25 score.
@@ -206,15 +212,24 @@ class BM25Index:
             reverse=True,
         )
 
-        return [
-            SparseResult(
-                id=self._ids[i],
-                document=self._documents[i],
-                metadata=self._metadatas[i],
-                score=s,
+        results: list[SparseResult] = []
+        for s, i in ranked:
+            meta = self._metadatas[i]
+            if filter_period and meta.get("work_period") != filter_period:
+                continue
+            if filter_slug and meta.get("work_slug") != filter_slug:
+                continue
+            results.append(
+                SparseResult(
+                    id=self._ids[i],
+                    document=self._documents[i],
+                    metadata=meta,
+                    score=s,
+                )
             )
-            for s, i in ranked[:top_k]
-        ]
+            if len(results) >= top_k:
+                break
+        return results
 
 
 # ── Convenience function ──────────────────────────────────────────────────────

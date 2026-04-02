@@ -239,7 +239,12 @@ def hybrid_search(
             metadatas=data["metadatas"],
         )
 
-    sparse_results = bm25_index.search(query, top_k=sparse_top_k)
+    sparse_results = bm25_index.search(
+        query,
+        top_k=sparse_top_k,
+        filter_period=filter_period,
+        filter_slug=filter_slug,
+    )
 
     # ── 3. RRF merge (all dense lists + sparse) ───────────────────────────────
     # Use the first dense list as the primary; merge in remaining lists
