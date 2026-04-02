@@ -59,12 +59,14 @@ def _reciprocal_rank(hit_ranks: list[int]) -> float:
 # ── main ──────────────────────────────────────────────────────────────────────
 
 
-def run(use_synonyms: bool = False, use_hyde: bool = False) -> None:
+def run(use_synonyms: bool = False, use_hyde: bool = False, aphorism_bonus: float = 0.0) -> None:
     parts = []
     if use_synonyms:
         parts.append("synonym expansion")
     if use_hyde:
         parts.append("HyDE")
+    if aphorism_bonus:
+        parts.append(f"aphorism bonus={aphorism_bonus}")
     label = " + ".join(parts) if parts else "baseline"
     console.print(f"\n[bold cyan]Retrieval eval — {label}[/bold cyan]\n")
 
@@ -116,6 +118,7 @@ def run(use_synonyms: bool = False, use_hyde: bool = False) -> None:
             sentence_transformer=st,
             cross_encoder=ce,
             use_hyde=use_hyde,
+            aphorism_bonus=aphorism_bonus,
         )
         elapsed = time.time() - t_q
 
@@ -197,8 +200,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--synonyms", action="store_true", help="Enable BM25 synonym expansion")
     parser.add_argument("--hyde", action="store_true", help="Enable HyDE query expansion")
+    parser.add_argument(
+        "--aphorism-bonus",
+        type=float,
+        default=0.0,
+        metavar="BONUS",
+        help=f"Additive reranker bonus for aphorism chunks (default: 0.0; suggested: {config.APHORISM_RERANK_BONUS})",
+    )
     args = parser.parse_args()
 
     import os
     os.environ.setdefault("VECTOR_STORE_BACKEND", "supabase")
-    run(use_synonyms=args.synonyms, use_hyde=args.hyde)
+    run(use_synonyms=args.synonyms, use_hyde=args.hyde, aphorism_bonus=args.aphorism_bonus)

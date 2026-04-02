@@ -89,6 +89,7 @@ def rerank(
     top_n: int = config.RERANK_TOP_N,
     model_name: str = config.RERANKER_MODEL,
     model: CrossEncoder | None = None,
+    aphorism_bonus: float = 0.0,
 ) -> list[HybridResult]:
     """Rerank *results* with a cross-encoder and return the top *top_n*.
 
@@ -103,6 +104,10 @@ def rerank(
         model_name: HuggingFace cross-encoder model identifier.
         model: Optional pre-loaded :class:`CrossEncoder` instance.  If
             provided, *model_name* is ignored.
+        aphorism_bonus: Additive bonus applied to chunks with
+            ``chunk_type == "aphorism"`` after cross-encoder scoring.
+            Helps specific aphorisms beat broad prose passages when their
+            raw cross-encoder scores are close.  Set to 0.0 to disable.
 
     Returns:
         Top *top_n* :class:`HybridResult` objects sorted by descending
@@ -117,7 +122,8 @@ def rerank(
     scores: list[float] = model.predict(pairs).tolist()
 
     for result, score in zip(results, scores):
-        result.rerank_score = score
+        bonus = aphorism_bonus if result.metadata.get("chunk_type") == "aphorism" else 0.0
+        result.rerank_score = score + bonus
 
     ranked = sorted(results, key=lambda r: r.rerank_score, reverse=True)  # type: ignore[arg-type]
     return ranked[:top_n]
@@ -142,6 +148,7 @@ def hybrid_search(
     cross_encoder: CrossEncoder | None = None,
     use_hyde: bool = False,
     hyde_model: str = config.HYDE_MODEL,
+    aphorism_bonus: float = config.APHORISM_RERANK_BONUS,
 ) -> list[HybridResult]:
     """Run full hybrid retrieval pipeline for *query*.
 
@@ -171,6 +178,10 @@ def hybrid_search(
             Claude and embed it for dense search instead of the raw question.
             BM25 and the reranker still use the original *query*.
         hyde_model: Claude model used for HyDE generation (default: haiku).
+        aphorism_bonus: Additive score bonus applied to aphorism-type chunks
+            after cross-encoder scoring (default: ``config.APHORISM_RERANK_BONUS``).
+            Helps specific aphorisms beat broad prose passages.  Set to 0.0
+            to disable.
 
     Returns:
         Top *top_n* :class:`HybridResult` objects sorted by rerank score.
@@ -208,4 +219,10 @@ def hybrid_search(
     merged = reciprocal_rank_fusion(dense_results, sparse_results, k=rrf_k)
 
     # ── 4. Rerank ─────────────────────────────────────────────────────────────
-    return rerank(query, merged, top_n=top_n, model_name=reranker_model, model=cross_encoder)
+    return rerank(
+        query, merged,
+        top_n=top_n,
+        model_name=reranker_model,
+        model=cross_encoder,
+        aphorism_bonus=aphorism_bonus,
+    )
